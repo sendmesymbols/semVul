@@ -179,3 +179,13 @@ pip install -r requirements.txt
 .\run.ps1 -Dataset devign -Ablate
 .\run.ps1 -Dataset reveal -Ablate
 If Devign accuracy misses on the first run, the fix is a single-line change in src/config.py (LORA_CFG["r"] = 32, LORA_CFG["epochs"] = 5) and re-running run.ps1 — LoRA re-trains, everything downstream re-uses cache.
+
+The FuSEVul code is here, and the README already flags a difference: explanations are encoded using RoBERTa, not the MiniLM your implementations use. Let me read the actual architecture — this is exactly the delta I wanted:
+
+
+Read 4 files
+This is a bombshell. Read FuSEVul's actual model.py forward pass carefully — lines 28-29:
+
+output = self.attention(code_output, text_output)[:, 0, :]   # fuse code + explanation
+output = self.fc1(code_output)                                # ← overwrites it; explanation discarded
+Line 28 computes the code+explanation fusion, then line 29 immediately overwrites output with fc1(code_output) — the attention result (the only place the explanation is used) is dead code, and text_output never reaches the classifier. As released, FuSEVul's model is effectively code-only; the explanation is thrown away by a bug. Let me confirm the intended architecture and the ablation numbers against the paper before I lay out what this means:

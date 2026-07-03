@@ -73,6 +73,29 @@ def _load_qual(dataset: str, split: str) -> np.ndarray:
     return q
 
 
+def _load_sids(dataset: str, split: str) -> np.ndarray:
+    """sample_id = sha1(normalized_code)[:16], stored in the code cache."""
+    p = code_cache(dataset, split, "graphcodebert", "lora")
+    return np.load(p, allow_pickle=True)["sample_ids"].astype(str)
+
+
+def _dedup_disjoint(sids_tr: np.ndarray, sids_va: np.ndarray):
+    """Drop within-train duplicate functions (keep first) and remove from val any
+    function that is a within-val duplicate OR already appears in train. Yields
+    train/val as disjoint sets of UNIQUE functions, eliminating the ~6% train->val
+    leakage baked into the raw Devign split (identical functions in both folds)."""
+    seen, tr_keep = set(), []
+    for i, s in enumerate(sids_tr):
+        if s not in seen:
+            seen.add(s); tr_keep.append(i)
+    va_seen, va_keep = set(), []
+    for i, s in enumerate(sids_va):
+        if s in seen or s in va_seen:
+            continue
+        va_seen.add(s); va_keep.append(i)
+    return np.asarray(tr_keep, dtype=int), np.asarray(va_keep, dtype=int)
+
+
 def _honest_split(y: np.ndarray, frac: float, seed: int) -> Tuple[np.ndarray, np.ndarray]:
     """Stratified TUNE/TRAIN split by class, deterministic per (frac, seed)."""
     rng = np.random.default_rng(seed)
@@ -166,6 +189,15 @@ def run(dataset: str, ladder: str, tag: str = "full",
     E_va,     y_va     = _load_text(dataset, "val")
     Q_tr_all = _load_qual(dataset, "train")
     Q_va     = _load_qual(dataset, "val")
+
+    # --- de-leak: train/val must be disjoint sets of unique functions ---
+    sids_tr, sids_va = _load_sids(dataset, "train"), _load_sids(dataset, "val")
+    keep_tr, keep_va = _dedup_disjoint(sids_tr, sids_va)
+    n_tr0, n_va0 = len(sids_tr), len(sids_va)
+    C_tr_all, E_tr_all, Q_tr_all, y_tr_all = (a[keep_tr] for a in (C_tr_all, E_tr_all, Q_tr_all, y_tr_all))
+    C_va, E_va, Q_va, y_va = (a[keep_va] for a in (C_va, E_va, Q_va, y_va))
+    print(f"[dedup] train {n_tr0}->{len(keep_tr)}  val {n_va0}->{len(keep_va)} "
+          f"(dropped {n_tr0 - len(keep_tr)} train dups, {n_va0 - len(keep_va)} val dup/leaked)")
 
     # honest tune split
     idx_tr, idx_tu = _honest_split(y_tr_all, HEAD_CFG["tune_frac"], HEAD_CFG["tune_seed"])
