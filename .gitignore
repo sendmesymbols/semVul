@@ -1,0 +1,26 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+.vscode/
+.idea/
+*.log
+
+# generated
+experiments/cache/
+experiments/runs/
+experiments/reports/*.md
+experiments/reports/*.csv
+*.npz
+*.pt
+*.ckpt
+*.bin
+
+# downloaded models (HuggingFace cache lives here)
+models/
+
+# never touch data
+!data/
+!explanations/
