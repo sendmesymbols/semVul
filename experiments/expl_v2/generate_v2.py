@@ -22,6 +22,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -96,6 +97,9 @@ def main():
     ap.add_argument("--timeout", type=int, default=600)
     ap.add_argument("--no-think", action="store_true",
                     help='send "think": false (qwen3-family thinking models)')
+    ap.add_argument("--workers", type=int, default=1,
+                    help="concurrent requests; set OLLAMA_NUM_PARALLEL>=workers "
+                         "on the server or requests just queue")
     args = ap.parse_args()
 
     out_path = args.out or default_out(args.dataset, args.split, args.model, args.tag)
@@ -122,46 +126,51 @@ def main():
           f"total={len(samples)} done={len(done)} todo={len(todo)} -> {out_path}",
           flush=True)
 
+    def gen_one(s):
+        code = s.code[:MAX_CODE_CHARS]
+        err = None
+        for attempt in (1, 2):
+            try:
+                t1 = time.time()
+                resp = ollama_chat(args.host, args.model,
+                                   build_messages(code),
+                                   args.num_ctx, args.timeout,
+                                   args.no_think)
+                dur_s = time.time() - t1
+                expl = json.loads(resp["message"]["content"])
+                return {
+                    "sample_id": s.sample_id,
+                    "label": s.label,
+                    "raw_code": s.code,
+                    "explanation": expl,
+                    "meta": {"model": args.model, "prompt": "v2",
+                             "gen_seconds": round(dur_s, 2)},
+                }, None
+            except (urllib.error.URLError, urllib.error.HTTPError,
+                    json.JSONDecodeError, KeyError, TimeoutError,
+                    OSError) as e:
+                err = f"{type(e).__name__}: {e}"
+                time.sleep(2 * attempt)
+        return None, f"{s.sample_id}: {err}"
+
     n_ok, n_fail, t0 = 0, 0, time.time()
     with open(out_path, "a", encoding="utf-8") as fh:
-        for i, s in enumerate(todo):
-            code = s.code[:MAX_CODE_CHARS]
-            expl, dur_s, err = None, None, None
-            for attempt in (1, 2):
-                try:
-                    t1 = time.time()
-                    resp = ollama_chat(args.host, args.model,
-                                       build_messages(code),
-                                       args.num_ctx, args.timeout,
-                                       args.no_think)
-                    dur_s = time.time() - t1
-                    expl = json.loads(resp["message"]["content"])
-                    break
-                except (urllib.error.URLError, urllib.error.HTTPError,
-                        json.JSONDecodeError, KeyError, TimeoutError,
-                        OSError) as e:
-                    err = f"{type(e).__name__}: {e}"
-                    time.sleep(2 * attempt)
-            if expl is None:
-                n_fail += 1
-                print(f"[gen] FAIL {s.sample_id}: {err}", flush=True)
-                continue
-            row = {
-                "sample_id": s.sample_id,
-                "label": s.label,
-                "raw_code": s.code,
-                "explanation": expl,
-                "meta": {"model": args.model, "prompt": "v2",
-                         "gen_seconds": round(dur_s, 2)},
-            }
-            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
-            fh.flush()
-            n_ok += 1
-            if n_ok % 10 == 0 or i == len(todo) - 1:
-                rate = n_ok / max(time.time() - t0, 1e-9)
-                eta_min = (len(todo) - i - 1) / max(rate, 1e-9) / 60
-                print(f"[gen] {n_ok}/{len(todo)} ok ({n_fail} fail) "
-                      f"{rate:.2f}/s eta {eta_min:.0f} min", flush=True)
+        with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
+            futures = [pool.submit(gen_one, s) for s in todo]
+            for i, fut in enumerate(as_completed(futures)):
+                row, err = fut.result()
+                if row is None:
+                    n_fail += 1
+                    print(f"[gen] FAIL {err}", flush=True)
+                    continue
+                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+                fh.flush()
+                n_ok += 1
+                if n_ok % 10 == 0 or i == len(todo) - 1:
+                    rate = n_ok / max(time.time() - t0, 1e-9)
+                    eta_min = (len(todo) - i - 1) / max(rate, 1e-9) / 60
+                    print(f"[gen] {n_ok}/{len(todo)} ok ({n_fail} fail) "
+                          f"{rate:.2f}/s eta {eta_min:.0f} min", flush=True)
 
     print(f"[gen] DONE ok={n_ok} fail={n_fail} "
           f"elapsed={(time.time() - t0) / 60:.1f} min -> {out_path}", flush=True)

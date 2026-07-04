@@ -87,9 +87,13 @@ def _metrics_at(thr, prob1, y):
 
 def train_rung(dataset, rung, *, epochs=12, patience=3, batch=4, grad_accum=8,
                max_code=320, max_text=256, lr=2e-5, fusion="self", tune_frac=0.12,
-               subset=None, seed=1337, out_dir=RUNS):
+               subset=None, seed=1337, split_seed=None, out_dir=RUNS):
     from transformers import AutoModel, AutoTokenizer
     t0 = time.time()
+    # split_seed fixes the TUNE carve independently of training randomness so
+    # multi-seed ensemble members share one tune slice (aligned tune probs).
+    if split_seed is None:
+        split_seed = seed
     torch.manual_seed(seed); np.random.seed(seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     bf16 = device == "cuda" and torch.cuda.is_bf16_supported()
@@ -114,7 +118,7 @@ def train_rung(dataset, rung, *, epochs=12, patience=3, batch=4, grad_accum=8,
     va_ti, va_tm = _tok(text_tok, va["expl"], max_text)
     va_q = torch.from_numpy(va["qual"]); yva = va["y"]
 
-    trm, tum = _tune_mask(y, tune_frac, seed)
+    trm, tum = _tune_mask(y, tune_frac, split_seed)
     ytr, ytu = y[trm], y[tum]
     ytr_t = torch.from_numpy(ytr)
     print(f"[{tag}] train'={trm.sum()} tune={tum.sum()} val={len(yva)}", flush=True)
@@ -193,15 +197,16 @@ def train_rung(dataset, rung, *, epochs=12, patience=3, batch=4, grad_accum=8,
         "stated": STATED[dataset],
         "config": dict(epochs=epochs, patience=patience, batch=batch,
                        grad_accum=grad_accum, max_code=max_code, max_text=max_text,
-                       lr=lr, tune_frac=tune_frac, seed=seed, subset=subset,
-                       use_focal=use_focal, alpha_pos=alpha_pos),
+                       lr=lr, tune_frac=tune_frac, seed=seed, split_seed=split_seed,
+                       subset=subset, use_focal=use_focal, alpha_pos=alpha_pos),
         "seconds": round(time.time() - t0, 1),
     }
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, f"fusevul_ladder_{tag}.json"), "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
     np.savez_compressed(os.path.join(out_dir, f"fusevul_ladder_{tag}_probs.npz"),
-                        val_prob=va_p, val_y=yva, tune_prob=tu_p, tune_y=ytu)
+                        val_prob=va_p, val_y=yva, tune_prob=tu_p, tune_y=ytu,
+                        tune_idx=tu_idx)
     a, t_, st = payload["argmax"], payload["tuned_on_tune"], STATED[dataset]
     print(f"[{tag}] DONE @ep{ep_best}  ROC={payload['val_roc_auc']:.2f} PR={payload['val_pr_auc']:.2f} | "
           f"argmax acc={a['acc']:.2f} f1={a['f1']:.2f} | tuned acc={t_['acc']:.2f} f1={t_['f1']:.2f} "
