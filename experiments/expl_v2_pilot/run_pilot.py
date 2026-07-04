@@ -70,7 +70,7 @@ RESULTS_JSON = os.path.join(OUT, "pilot_results.json")
 # ---------------------------------------------------------------------------
 MODEL = "qwen3.5:9b"          # exact Ollama tag as requested
 HOST = "http://localhost:9999"
-N_SUBSET = 3000               # total samples (N/2 per class); ~3-5k range
+N_SUBSET = 2000               # total samples (N/2 per class); ~3-5k range
 NO_THINK = True               # qwen3-family: send "think": false (huge speedup)
 WORKERS = 1                   # raise only if OLLAMA_NUM_PARALLEL is set server-side
 NUM_CTX = 8192
