@@ -175,24 +175,30 @@ def evaluate(dataset, rungs, extra_dirs):
 
 
 def main():
+    # Defaults are set so the BARE command:
+    #     python experiments/fusevul_ladder/ensemble.py
+    # reproduces the best result we have: an eval-only, pooled ensemble over
+    # every saved L1/L2/L3 member (all seeds), on both datasets, no GPU.
+    # Opt in to training extra seeds with --train; disable pooling with --no-pool.
     ap = argparse.ArgumentParser()
     ap.add_argument("--datasets", nargs="*", default=["reveal", "devign"])
-    ap.add_argument("--rungs", nargs="*", default=["L3"])
+    ap.add_argument("--rungs", nargs="*", default=["L1", "L2", "L3"])
     ap.add_argument("--seeds", nargs="*", type=int, default=[2024, 2025, 2026])
     ap.add_argument("--epochs", type=int, default=12)
     ap.add_argument("--batch", type=int, default=4)
     ap.add_argument("--fusion", default="self")
-    ap.add_argument("--eval-only", action="store_true",
-                    help="skip training; just ensemble existing prob files")
+    ap.add_argument("--train", dest="train", action="store_true",
+                    help="train the seed members first (default: eval only)")
     ap.add_argument("--extra-dirs", nargs="*", default=[],
                     help="extra dirs to scan for *_probs.npz (e.g. copied "
                          "from another machine)")
-    ap.add_argument("--pool", action="store_true",
-                    help="pool ALL --rungs into one ensemble (the RQ4 "
-                         "'multi-seed + multi-rung ensemble' component)")
+    ap.add_argument("--no-pool", dest="pool", action="store_false",
+                    help="report each rung separately instead of one pooled "
+                         "ensemble (pooling is the default)")
+    ap.set_defaults(pool=True)
     args = ap.parse_args()
 
-    if not args.eval_only:
+    if args.train:
         from train import train_rung
         for seed in args.seeds:
             out_dir = os.path.join(SEED_DIR, f"s{seed}")
