@@ -87,10 +87,29 @@ def beat_both_sweep(prob1, y, sa, sf):
                             worst_margin=round(margin, 2))
 
 
-def evaluate(dataset, rung, extra_dirs):
-    files = member_files(dataset, rung, extra_dirs)
+def _best_both_thr(prob1, y, sa, sf):
+    """Threshold maximizing the worst-side margin vs stated targets,
+    computed on the TUNE slice only (non-circular)."""
+    best = (None, -1e9)
+    for t in np.linspace(0.02, 0.98, 385):
+        yh = (prob1 >= t).astype(int)
+        m = min(100 * accuracy_score(y, yh) - sa,
+                100 * f1_score(y, yh, zero_division=0) - sf)
+        if m > best[1]:
+            best = (float(t), m)
+    return best[0]
+
+
+def evaluate(dataset, rungs, extra_dirs):
+    """Ensemble all prob files for the given rung(s). Passing several rungs
+    pools them into one ensemble (the RQ4 'ensemble' component: seeds x rungs)."""
+    files = []
+    for rung in rungs:
+        files.extend(member_files(dataset, rung, extra_dirs))
+    files = sorted(set(files))
+    label = "+".join(rungs)
     if not files:
-        print(f"[{dataset} {rung}] no prob files found")
+        print(f"[{dataset} {label}] no prob files found")
         return
     val_probs, tune_probs, val_y, tune_y, tune_idx = [], [], None, None, None
     rocs = []
@@ -128,7 +147,7 @@ def evaluate(dataset, rung, extra_dirs):
     n = len(val_probs)
     ens = np.mean(val_probs, axis=0)
     st = STATED[dataset]
-    print(f"\n=== {dataset} {rung} — ensemble of {n} member(s) "
+    print(f"\n=== {dataset} {label} — ensemble of {n} member(s) "
           f"(member ROCs: {', '.join(f'{r:.2f}' for r in rocs)})")
     print(f"  ensemble ROC={100 * roc_auc_score(val_y, ens):.2f} "
           f"PR={100 * average_precision_score(val_y, ens):.2f} "
@@ -143,6 +162,12 @@ def evaluate(dataset, rung, extra_dirs):
         print(f"  tuned-on-tune: thr={t['threshold']} acc={t['acc']:.2f} "
               f"f1={t['f1']:.2f} p={t['prec']:.2f} r={t['rec']:.2f} "
               f"({n - skipped_tune} aligned tune members)")
+        thr_b = _best_both_thr(tens, tune_y, st["acc"], st["f1"])
+        tb = _metrics_at(thr_b, ens, val_y)
+        both = tb["acc"] > st["acc"] and tb["f1"] > st["f1"]
+        print(f"  both-tuned:    thr={tb['threshold']} acc={tb['acc']:.2f} "
+              f"f1={tb['f1']:.2f} p={tb['prec']:.2f} r={tb['rec']:.2f} "
+              f"-> {'BEAT BOTH (threshold chosen on tune)' if both else 'short'}")
     found, bb = beat_both_sweep(ens, val_y, st["acc"], st["f1"])
     verdict = "BEAT BOTH" if found else "no single threshold beats both"
     print(f"  joint sweep:   thr={bb['threshold']} acc={bb['acc']:.2f} "
@@ -162,6 +187,9 @@ def main():
     ap.add_argument("--extra-dirs", nargs="*", default=[],
                     help="extra dirs to scan for *_probs.npz (e.g. copied "
                          "from another machine)")
+    ap.add_argument("--pool", action="store_true",
+                    help="pool ALL --rungs into one ensemble (the RQ4 "
+                         "'multi-seed + multi-rung ensemble' component)")
     args = ap.parse_args()
 
     if not args.eval_only:
@@ -180,8 +208,11 @@ def main():
                                split_seed=SPLIT_SEED, out_dir=out_dir)
 
     for ds in args.datasets:
-        for rung in args.rungs:
-            evaluate(ds, rung, args.extra_dirs)
+        if args.pool:
+            evaluate(ds, args.rungs, args.extra_dirs)
+        else:
+            for rung in args.rungs:
+                evaluate(ds, [rung], args.extra_dirs)
 
 
 if __name__ == "__main__":
