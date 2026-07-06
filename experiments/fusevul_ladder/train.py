@@ -144,6 +144,17 @@ def train_rung(dataset, rung, *, epochs=12, patience=3, batch=4, grad_accum=8,
         return np.concatenate(outs)
 
     best_ap, best = -1.0, None
+    # Parallel tracker: the epoch with best val F1@0.5. This is the BASE PAPER's
+    # selection rule (best epoch chosen on val, then reported on val -> circular).
+    # We record it ONLY to produce a comparability column under their protocol;
+    # our headline stays the non-circular tune-selected number above.
+    best_valf1, best_val = -1.0, None
+    # Faithful base-paper replication: FuSEVul selects the epoch by val ACCURACY.
+    # Track that separately from best-val-F1, and log the full per-epoch val
+    # trajectory + probs so the comparability column can't hide a cherry-pick.
+    best_valacc, best_val_acc = -1.0, None
+    ep_log = []            # [(ep, val_acc@0.5, val_f1@0.5, val_roc)]
+    ep_val_probs = []      # per-epoch val_prob vectors, aligned to ep_log
     wait = 0
     for ep in range(1, epochs + 1):
         model.train()
@@ -173,9 +184,31 @@ def train_rung(dataset, rung, *, epochs=12, patience=3, batch=4, grad_accum=8,
         va_p = prob1(va_ci, va_cm, va_ti, va_tm, va_q)
         ap = average_precision_score(ytu, tu_p) if ytu.sum() > 0 else 0.0
         va_f1_argmax = f1_score(yva, (va_p >= 0.5).astype(int), zero_division=0) * 100
+        va_acc_argmax = accuracy_score(yva, (va_p >= 0.5).astype(int)) * 100
+        va_roc = roc_auc_score(yva, va_p) * 100
         print(f"[{tag}] ep{ep}/{epochs} loss={np.mean(losses):.4f} tune_prauc={ap*100:.2f} "
-              f"val_f1@0.5={va_f1_argmax:.2f} val_roc={roc_auc_score(yva, va_p)*100:.2f}",
+              f"val_acc@0.5={va_acc_argmax:.2f} val_f1@0.5={va_f1_argmax:.2f} val_roc={va_roc:.2f}",
               flush=True)
+        ep_log.append((ep, va_acc_argmax, va_f1_argmax, va_roc))
+        ep_val_probs.append(va_p.copy())
+        # Incremental crash-safe dump: the per-epoch acc/F1@0.5 trajectory is
+        # enough to answer the base-paper-protocol question even if the run is
+        # killed before the final JSON is written. Overwritten each epoch.
+        try:
+            os.makedirs(out_dir, exist_ok=True)
+            with open(os.path.join(out_dir, f"fusevul_ladder_{tag}_partial.json"),
+                      "w", encoding="utf-8") as _pf:
+                json.dump({"dataset": dataset, "rung": rung, "epochs_done": ep,
+                           "stated": STATED[dataset],
+                           "per_epoch": [{"epoch": e, "acc": round(a, 2),
+                                          "f1": round(f, 2), "roc": round(r, 2)}
+                                         for (e, a, f, r) in ep_log]}, _pf, indent=2)
+        except OSError:
+            pass
+        if va_f1_argmax > best_valf1:
+            best_valf1, best_val = va_f1_argmax, (ep, va_p.copy())
+        if va_acc_argmax > best_valacc:
+            best_valacc, best_val_acc = va_acc_argmax, (ep, va_p.copy())
         if ap > best_ap:
             best_ap, best, wait = ap, (ep, va_p, tu_p), 0
         else:
@@ -185,6 +218,8 @@ def train_rung(dataset, rung, *, epochs=12, patience=3, batch=4, grad_accum=8,
                 break
 
     ep_best, va_p, tu_p = best
+    ep_bp, va_p_bp = best_val          # base-paper selection by best val F1@0.5
+    ep_ba, va_p_ba = best_val_acc      # base-paper selection by best val ACC@0.5
     thr_tune = _best_thr(tu_p, ytu, "f1")
     thr_val = _best_thr(va_p, yva, "f1")
     payload = {
@@ -194,6 +229,27 @@ def train_rung(dataset, rung, *, epochs=12, patience=3, batch=4, grad_accum=8,
         "argmax": _metrics_at(0.5, va_p, yva),
         "tuned_on_tune": _metrics_at(thr_tune, va_p, yva),
         "tuned_on_val": _metrics_at(thr_val, va_p, yva),
+        # Comparability column under the base paper's circular protocol (select
+        # epoch on val, report val). Clearly labeled; NOT our headline number.
+        # Both selection rules are reported at a SINGLE operating point (0.5) so
+        # acc and F1 come from the same epoch (no double cherry-pick). FuSEVul's
+        # stated rule is best val ACCURACY -> by_val_acc is the faithful match.
+        "base_paper_protocol": {
+            "by_val_acc": {
+                "select": "best val ACC@0.5 epoch (faithful to base paper)",
+                "epoch": ep_ba,
+                "argmax": _metrics_at(0.5, va_p_ba, yva),
+            },
+            "by_val_f1": {
+                "select": "best val F1@0.5 epoch (F1-favourable variant)",
+                "epoch": ep_bp,
+                "argmax": _metrics_at(0.5, va_p_bp, yva),
+            },
+            "per_epoch": [
+                {"epoch": e, "acc": round(a, 2), "f1": round(f, 2), "roc": round(r, 2)}
+                for (e, a, f, r) in ep_log
+            ],
+        },
         "stated": STATED[dataset],
         "config": dict(epochs=epochs, patience=patience, batch=batch,
                        grad_accum=grad_accum, max_code=max_code, max_text=max_text,
@@ -206,10 +262,16 @@ def train_rung(dataset, rung, *, epochs=12, patience=3, batch=4, grad_accum=8,
         json.dump(payload, f, indent=2)
     np.savez_compressed(os.path.join(out_dir, f"fusevul_ladder_{tag}_probs.npz"),
                         val_prob=va_p, val_y=yva, tune_prob=tu_p, tune_y=ytu,
-                        tune_idx=tu_idx)
+                        tune_idx=tu_idx, val_prob_bp=va_p_bp, val_prob_ba=va_p_ba,
+                        val_probs_per_epoch=np.asarray(ep_val_probs),
+                        ep_index=np.asarray([e for (e, *_ ) in ep_log]))
     a, t_, st = payload["argmax"], payload["tuned_on_tune"], STATED[dataset]
+    bp = payload["base_paper_protocol"]["by_val_acc"]["argmax"]
+    bpe = payload["base_paper_protocol"]["by_val_acc"]["epoch"]
     print(f"[{tag}] DONE @ep{ep_best}  ROC={payload['val_roc_auc']:.2f} PR={payload['val_pr_auc']:.2f} | "
           f"argmax acc={a['acc']:.2f} f1={a['f1']:.2f} | tuned acc={t_['acc']:.2f} f1={t_['f1']:.2f} "
+          f"| base-paper-proto(by val acc) @ep{bpe} "
+          f"acc={bp['acc']:.2f} f1={bp['f1']:.2f} "
           f"| stated {st} | {payload['seconds']/60:.1f} min", flush=True)
     del model, code_enc, text_enc
     if device == "cuda":

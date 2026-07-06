@@ -568,7 +568,7 @@ def generate(samples, args, out_path, km=None):
 # them out gives the explanation channel its cleanest shot at contributing
 # something orthogonal to the code channel.
 # ===========================================================================
-def v2_text(e) -> str:
+def v2_text(e, with_evidence=False) -> str:
     if not isinstance(e, dict):
         return ""
     parts = []
@@ -587,6 +587,10 @@ def v2_text(e) -> str:
             continue
         p, w = str(d.get("pattern", "")).strip(), str(d.get("why", "")).strip()
         seg = (p + " — " + w).strip(" —") if (p or w) else ""
+        if with_evidence:                        # --with-evidence: append the verbatim span
+            ev = str(d.get("evidence", "")).strip()
+            if ev:
+                seg = (seg + " [" + ev + "]").strip()
         if seg:
             risks.append(seg)
     if risks:
@@ -830,11 +834,11 @@ def train_eval(rung, packed, fit_idx, tune_idx, test_idx, args):
 # ===========================================================================
 # Build the aligned, packed dataset from generated rows + shared split.
 # ===========================================================================
-def build_packed(rows):
+def build_packed(rows, with_evidence=False):
     import numpy as np
     rows = [r for r in rows if r.get("label") in (0, 1)]
     code = [r.get("raw_code", "") or "" for r in rows]
-    expl = [v2_text(r.get("explanation") or {}) for r in rows]
+    expl = [v2_text(r.get("explanation") or {}, with_evidence) for r in rows]
     y = np.asarray([int(r["label"]) for r in rows], dtype=np.int64)
     qual = np.zeros((len(rows), 22), dtype=np.float32)  # L1/L2 ignore qual
     empties = sum(1 for e in expl if not e)
@@ -887,6 +891,9 @@ def main():
     ap.set_defaults(no_think=NO_THINK)
     ap.add_argument("--skip-gen", action="store_true",
                     help="skip generation; only run the L1-vs-L2 comparison")
+    ap.add_argument("--with-evidence", action="store_true",
+                    help="append verbatim risky_operations[].evidence spans into the "
+                         "L2 explanation text (ablation: does the dropped field help?)")
     ap.add_argument("--epochs", type=int, default=EPOCHS)
     ap.add_argument("--patience", type=int, default=PATIENCE)
     ap.add_argument("--batch", type=int, default=BATCH)
@@ -948,7 +955,10 @@ def main():
     sig = standalone_signal(rows)
 
     # Phase 2 — pack + shared split (identical for both rungs)
-    packed = build_packed(rows)
+    packed = build_packed(rows, args.with_evidence)
+    if args.with_evidence:
+        print("[data] --with-evidence: verbatim evidence spans APPENDED to L2 text",
+              flush=True)
     fit_idx, tune_idx, test_idx = make_split(packed["y"], TEST_FRAC, TUNE_FRAC,
                                              SPLIT_SEED)
 
