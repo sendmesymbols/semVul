@@ -19,8 +19,10 @@ from pathlib import Path
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score, average_precision_score
 
-CACHE = Path(r"D:\Projects\SemVul\experiments\cache")
-REPORT = Path(r"D:\Projects\SemVul\experiments\reports\devign_channel_probe.md")
+# Resolve relative to this file so the probe works regardless of repo location.
+_HERE = Path(__file__).resolve().parent
+CACHE = _HERE / "cache"
+REPORT = _HERE / "reports" / "devign_channel_probe.md"
 DATASET = "devign"
 SEEDS = (1337, 2024, 42)
 
