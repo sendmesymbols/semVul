@@ -40,32 +40,46 @@ def load_split(split: str):
     txt, ids_t, y_t = _load(f"{DATASET}_{split}_text_minilm.npz")
     qual = np.load(CACHE / f"{DATASET}_{split}_quality.npz")["quality"]
 
+    # fine-tuned (LoRA) explanation encoder -- optional; present once #1 has run.
+    ft_file = CACHE / f"{DATASET}_{split}_text_roberta_lora.npz"
+    expl_ft, ids_ft = None, None
+    if ft_file.exists():
+        expl_ft, ids_ft, _ = _load(ft_file.name)
+
     # sanity: all channels same length
     n = len(gcb)
     assert len(uni) == len(txt) == len(qual) == n, "channel length mismatch"
+    if expl_ft is not None:
+        assert len(expl_ft) == n, "expl_ft length mismatch"
+
+    def order_to(ids_ref, ids_other, arr):
+        pos = {s: i for i, s in enumerate(ids_other)}
+        idx = np.array([pos[s] for s in ids_ref])
+        return arr[idx]
 
     # align by sample_ids if present and not already identical
     def aligned(a, b):
         return a is not None and b is not None and np.array_equal(a, b)
     if not (aligned(ids_g, ids_u) and aligned(ids_g, ids_t)):
-        # build order by gcb's ids
-        def order_to(ids_ref, ids_other, arr):
-            pos = {s: i for i, s in enumerate(ids_other)}
-            idx = np.array([pos[s] for s in ids_ref])
-            return arr[idx]
         if ids_u is not None:
             uni = order_to(ids_g, ids_u, uni)
         if ids_t is not None:
             txt = order_to(ids_g, ids_t, txt)
         # quality has no ids -> assume it follows gcb order (same builder)
+    if expl_ft is not None and not aligned(ids_g, ids_ft):
+        expl_ft = order_to(ids_g, ids_ft, expl_ft)
+
     y = y_g if y_g is not None else y_t
     y = y.astype(np.int64)
-    return {
+    out = {
         "code1": gcb.astype(np.float32),          # GraphCodeBERT-LoRA (L1 code)
         "code2": uni.astype(np.float32),           # UniXcoder-frozen (L2 adds this)
-        "expl":  txt.astype(np.float32),           # MiniLM explanation embedding
+        "expl":  txt.astype(np.float32),           # MiniLM explanation embedding (frozen)
         "qual":  qual.astype(np.float32),          # 22 handcrafted quality feats
-    }, y
+    }
+    if expl_ft is not None:
+        out["expl_ft"] = expl_ft.astype(np.float32)  # roberta-base LoRA (the fair fight)
+    return out, y
 
 
 def standardize(train_x, val_x):
@@ -134,14 +148,21 @@ def main():
     FEATURE_SETS = [
         ("code_L1 (GCB)",            ["code1"]),
         ("code_L2 (GCB+UniX)",       ["code1", "code2"]),
-        ("expl_only",                ["expl"]),
+        ("expl_only (frozen MiniLM)", ["expl"]),
         ("qual_only",                ["qual"]),
-        ("code_L1 + expl",           ["code1", "expl"]),
+        ("code_L1 + expl(frozen)",   ["code1", "expl"]),
         ("code_L1 + qual",           ["code1", "qual"]),
         ("expl + qual",              ["expl", "qual"]),
         ("code_L1 + expl + qual (=full L1)", ["code1", "expl", "qual"]),
         ("code_L2 + expl + qual (=full L2)", ["code1", "code2", "expl", "qual"]),
     ]
+    if "expl_ft" in tr:
+        FEATURE_SETS += [
+            ("expl_ft_only (roberta-LoRA)  [A]", ["expl_ft"]),
+            ("code_L1 + expl_ft            [B]", ["code1", "expl_ft"]),
+            ("code_L1 + expl_ft + qual",         ["code1", "expl_ft", "qual"]),
+            ("code_L2 + expl_ft + qual",         ["code1", "code2", "expl_ft", "qual"]),
+        ]
 
     rows = []
     for label, feats in FEATURE_SETS:

@@ -67,6 +67,7 @@ for _p in (ROOT, EXPL_V2, LADDER):
 import src.config  # noqa: F401,E402  (sets HF_HOME/HF_HUB_CACHE before transformers)
 from src.data_io import load_split                       # noqa: E402
 from prompt_v2 import JSON_SCHEMA, build_messages         # noqa: E402  (the v2 prompt under test)
+from prompt_v2_real import build_messages as build_messages_real  # noqa: E402  (real-code variant, path C)
 
 OUT = os.path.join(HERE, "out")
 os.makedirs(OUT, exist_ok=True)
@@ -79,11 +80,12 @@ def _sanitize(model: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "-", model).strip("-").lower()
 
 
-def expl_path(model: str) -> str:
-    """Output file is MODEL-specific so different generators never mix in one
-    file (the local qwen3.5:9b rows stay in their own file, the cloud model in
-    its own). Each is independently resumable."""
-    return os.path.join(OUT, f"expl_v2_pilot__{_sanitize(model)}.jsonl")
+def expl_path(model: str, dataset: str = "devign") -> str:
+    """Output file is MODEL-(and dataset-)specific so different generators/datasets
+    never mix in one file (local qwen vs cloud rows; anonymized vs de-anonymized
+    code each stay separate). Each is independently resumable."""
+    tag = _sanitize(model) if dataset == "devign" else f"{dataset}__{_sanitize(model)}"
+    return os.path.join(OUT, f"expl_v2_pilot__{tag}.jsonl")
 
 
 # ---------------------------------------------------------------------------
@@ -131,8 +133,8 @@ RISK_MAP = {"none": 0, "low": 1, "medium": 2, "high": 3}
 # ===========================================================================
 # Phase 0 — deterministic stratified subset (dedup within train)
 # ===========================================================================
-def select_subset(n: int, seed: int):
-    samples = load_split("devign", "train")
+def select_subset(n: int, seed: int, dataset: str = "devign"):
+    samples = load_split(dataset, "train")
     seen, uniq = set(), []
     for s in samples:                       # drop within-train duplicate functions
         if s.sample_id in seen:
@@ -876,6 +878,9 @@ def make_split(y, test_frac, tune_frac, seed):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--n", type=int, default=N_SUBSET)
+    ap.add_argument("--dataset", default="devign",
+                    help="load_split dataset; use 'devign_real' for de-anonymized "
+                         "code + real-code prompt (path C)")
     ap.add_argument("--provider", default=PROVIDER, choices=["clod", "ollama"])
     ap.add_argument("--model", default=MODEL)
     ap.add_argument("--host", default=HOST)
@@ -904,7 +909,7 @@ def main():
     ap.add_argument("--train-seed", type=int, default=TRAIN_SEED)
     args = ap.parse_args()
 
-    out_path = expl_path(args.model)
+    out_path = expl_path(args.model, args.dataset)
     keys = load_keys(KEYS_FILE) if args.provider == "clod" else []
 
     if args.list_models:
@@ -932,7 +937,12 @@ def main():
     print("=" * 78, flush=True)
 
     # Phase 0 + 1 — subset + generation
-    subset = select_subset(args.n, GEN_SEED)
+    global build_messages
+    if args.dataset.endswith("_real"):
+        build_messages = build_messages_real
+        print(f"[prompt] using real-code prompt (prompt_v2_real) for dataset={args.dataset}",
+              flush=True)
+    subset = select_subset(args.n, GEN_SEED, args.dataset)
     km = None
     if not args.skip_gen:
         if args.provider == "clod":

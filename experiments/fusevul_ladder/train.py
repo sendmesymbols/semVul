@@ -87,7 +87,7 @@ def _metrics_at(thr, prob1, y):
 
 def train_rung(dataset, rung, *, epochs=12, patience=3, batch=4, grad_accum=8,
                max_code=320, max_text=256, lr=2e-5, fusion="self", tune_frac=0.12,
-               subset=None, seed=1337, split_seed=None, out_dir=RUNS):
+               subset=None, seed=1337, split_seed=None, out_dir=RUNS, focal="auto"):
     from transformers import AutoModel, AutoTokenizer
     t0 = time.time()
     # split_seed fixes the TUNE carve independently of training randomness so
@@ -125,7 +125,9 @@ def train_rung(dataset, rung, *, epochs=12, patience=3, batch=4, grad_accum=8,
 
     pos_rate = float(ytr.mean())
     alpha_pos = float(np.clip(1.0 - pos_rate, 0.5, 0.80))
-    use_focal = dataset == "reveal"
+    # focal="auto" preserves prior behavior (focal on ReVeal only); "on"/"off" override
+    # so the RO4 focal-loss ablation can be run on Devign (currently plain CE).
+    use_focal = {"on": True, "off": False}.get(focal, dataset == "reveal")
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-2)
     scaler = torch.amp.GradScaler("cuda", enabled=(device == "cuda" and not bf16))
 
