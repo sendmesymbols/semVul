@@ -44,7 +44,17 @@ STATED = {"devign": {"acc": 60.39, "f1": 55.91},
 
 def member_files(dataset, rung, extra_dirs):
     pats = [os.path.join(RUNS, f"fusevul_ladder_{dataset}_{rung}_probs.npz"),
-            os.path.join(SEED_DIR, "s*", f"fusevul_ladder_{dataset}_{rung}_probs.npz")]
+            os.path.join(SEED_DIR, "s*", f"fusevul_ladder_{dataset}_{rung}_probs.npz"),
+            # enriched-data retrains (2026-07-08): runs/enriched (reveal 320-tok)
+            # and runs/enriched512 (devign 512-tok), incl. per-seed subfolders
+            # copied back from other machines (retrain_remote.py). Their tune
+            # slices differ in size from the baseline members (cleaned train),
+            # so they contribute to the val ensemble but are auto-skipped for
+            # tune averaging.
+            os.path.join(RUNS, "enriched*", "**",
+                         f"fusevul_ladder_{dataset}_{rung}_probs.npz"),
+            # laptop members consolidated from ladder_probs_laptop.zip (2026-07-08)
+            os.path.join(RUNS, "laptop", f"fusevul_ladder_{dataset}_{rung}_probs.npz")]
     for d in extra_dirs:
         pats.append(os.path.join(d, f"fusevul_ladder_{dataset}_{rung}_probs.npz"))
         pats.append(os.path.join(d, "**", f"fusevul_ladder_{dataset}_{rung}_probs.npz"))

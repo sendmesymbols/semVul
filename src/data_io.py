@@ -2,8 +2,15 @@
 
 Each JSONL row: {sample_id, label (0/1), raw_code, explanation: {purpose,
 data_flow, risky_operations[], missing_checks[], evidence_tokens[], risk_summary}}
+
+Variant selection: set SEMVUL_EXPL_VARIANT=enriched to load
+<ds>_<split>.enriched.jsonl (written by experiments/expl_enrich/run_enrich.py)
+instead of the original files. Enriched rows carry extra fields
+(safety_indicators, tail_facts, risk_level, code_metrics) which
+explanation_text folds into the text channel when present.
 """
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, List
@@ -50,15 +57,27 @@ class Sample:
         parts = [
             _to_str(e.get("purpose")),
             _to_str(e.get("data_flow")),
+        ]
+        if e.get("risk_level"):  # enriched rows: lead with the calibrated level
+            parts.append(f"overall risk level: {_to_str(e.get('risk_level'))}.")
+        parts += [
             " ".join(_to_list(e.get("risky_operations"))),
             " ".join(_to_list(e.get("missing_checks"))),
-            _to_str(e.get("risk_summary")),
         ]
+        for g in (e.get("safety_indicators") or []):
+            if isinstance(g, dict):
+                parts.append(f"guard present: {_to_str(g.get('check'))} "
+                             f"[{_to_str(g.get('evidence'))}]")
+        if e.get("tail_facts"):
+            parts.append(_to_str(e.get("tail_facts")))
+        parts.append(_to_str(e.get("risk_summary")))
         return " ".join(p for p in parts if p).strip()
 
 
 def _jsonl_path(dataset: str, split: str) -> Path:
-    return EXPL_DIR / dataset / f"{dataset}_{split}.jsonl"
+    variant = os.environ.get("SEMVUL_EXPL_VARIANT", "").strip()
+    suffix = f".{variant}" if variant else ""
+    return EXPL_DIR / dataset / f"{dataset}_{split}{suffix}.jsonl"
 
 
 def iter_samples(dataset: str, split: str) -> Iterator[Sample]:
