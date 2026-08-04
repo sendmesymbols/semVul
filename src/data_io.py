@@ -44,6 +44,67 @@ def _to_list(v) -> List[str]:
     return [_to_str(v)]
 
 
+# --- explanation-text serialization (configurable field set) ---------------
+# Measured 2026-07-08 (leave-one-out held-out AUC): risk_summary / risk_level /
+# confidence / tail_facts each add ~0 to the text channel yet cost 40-55% of its
+# token budget (risk_summary alone is the 64%-coverage "No unguarded operation.."
+# boilerplate). The default channel therefore drops them and emits guards as
+# check-only (no verbatim quote). risk_level / confidence / code_metrics still
+# reach the model as cheap scalars via quality_features_v2. Placeholder purposes
+# ("No model-generated explanation available") are blanked. Overrides:
+#   SEMVUL_EXPL_FIELDS=full         emit every field (pre-2026-07-08 behavior)
+#   SEMVUL_EXPL_FIELDS=a,b,c        emit exactly this comma list
+#   SEMVUL_SAFETY_EVIDENCE=1        restore verbatim guard evidence quotes
+_FULL_EXPL_FIELDS = ("purpose", "data_flow", "risk_level", "risky_operations",
+                     "missing_checks", "safety_indicators", "tail_facts",
+                     "risk_summary")
+_DEFAULT_EXPL_FIELDS = ("purpose", "data_flow", "risky_operations",
+                        "missing_checks", "safety_indicators")
+_PLACEHOLDER_PURPOSE = "No model-generated explanation"
+
+
+def _expl_field_set():
+    v = os.environ.get("SEMVUL_EXPL_FIELDS", "").strip().lower()
+    if not v or v == "trim":
+        return _DEFAULT_EXPL_FIELDS
+    if v == "full":
+        return _FULL_EXPL_FIELDS
+    return tuple(x.strip() for x in v.split(",") if x.strip())
+
+
+def _render_expl_field(e: dict, name: str) -> str:
+    if name == "purpose":
+        p = _to_str(e.get("purpose"))
+        return "" if _PLACEHOLDER_PURPOSE in p else p
+    if name == "data_flow":
+        return _to_str(e.get("data_flow"))
+    if name == "risk_level":
+        rl = _to_str(e.get("risk_level"))
+        return f"overall risk level: {rl}." if rl else ""
+    if name == "risky_operations":
+        return " ".join(_to_list(e.get("risky_operations")))
+    if name == "missing_checks":
+        return " ".join(_to_list(e.get("missing_checks")))
+    if name == "safety_indicators":
+        keep_ev = os.environ.get("SEMVUL_SAFETY_EVIDENCE", "0") == "1"
+        gs = []
+        for g in (e.get("safety_indicators") or []):
+            if isinstance(g, dict):
+                c = _to_str(g.get("check"))
+                gs.append(f"guard present: {c} [{_to_str(g.get('evidence'))}]"
+                          if keep_ev else f"guard present: {c}")
+        return " ".join(gs)
+    if name == "tail_facts":
+        return _to_str(e.get("tail_facts"))
+    if name == "risk_summary":
+        return _to_str(e.get("risk_summary"))
+    if name == "evidence_tokens":
+        return " ".join(_to_list(e.get("evidence_tokens")))
+    # real-code enrichment fields (2026-07-08 *.real.jsonl: lexical_digest,
+    # function_name, called_functions, ...) and any future keys: emit verbatim.
+    return _to_str(e.get(name))
+
+
 @dataclass
 class Sample:
     sample_id: str
@@ -54,30 +115,32 @@ class Sample:
     @property
     def explanation_text(self) -> str:
         e = self.explanation or {}
-        parts = [
-            _to_str(e.get("purpose")),
-            _to_str(e.get("data_flow")),
-        ]
-        if e.get("risk_level"):  # enriched rows: lead with the calibrated level
-            parts.append(f"overall risk level: {_to_str(e.get('risk_level'))}.")
-        parts += [
-            " ".join(_to_list(e.get("risky_operations"))),
-            " ".join(_to_list(e.get("missing_checks"))),
-        ]
-        for g in (e.get("safety_indicators") or []):
-            if isinstance(g, dict):
-                parts.append(f"guard present: {_to_str(g.get('check'))} "
-                             f"[{_to_str(g.get('evidence'))}]")
-        if e.get("tail_facts"):
-            parts.append(_to_str(e.get("tail_facts")))
-        parts.append(_to_str(e.get("risk_summary")))
+        parts = [_render_expl_field(e, f) for f in _expl_field_set()]
         return " ".join(p for p in parts if p).strip()
 
 
+def _active_path(dataset: str, split: str) -> Path:
+    """Consolidated single-source input: explanations/SemanticVul/ACTIVE/<ds>/<split>.jsonl.
+    Copying just this folder onto another machine is enough to run."""
+    return EXPL_DIR / "ACTIVE" / dataset / f"{split}.jsonl"
+
+
 def _jsonl_path(dataset: str, split: str) -> Path:
+    ap = _active_path(dataset, split)
+    # SEMVUL_ACTIVE_DIR set -> ACTIVE is the canonical input when present.
+    if os.environ.get("SEMVUL_ACTIVE_DIR", "").strip() and ap.exists():
+        return ap
     variant = os.environ.get("SEMVUL_EXPL_VARIANT", "").strip()
+    if split == "val":
+        # SEMVUL_VAL_VARIANT lets val use a treated variant (e.g. enriched.real)
+        # while SEMVUL_TRAIN_SUFFIX independently picks the train file.
+        variant = os.environ.get("SEMVUL_VAL_VARIANT", "").strip() or variant
     suffix = f".{variant}" if variant else ""
-    return EXPL_DIR / dataset / f"{dataset}_{split}{suffix}.jsonl"
+    p = EXPL_DIR / dataset / f"{dataset}_{split}{suffix}.jsonl"
+    # Fallback: if the long-named file isn't on this machine, use ACTIVE.
+    if not p.exists() and ap.exists():
+        return ap
+    return p
 
 
 def iter_samples(dataset: str, split: str) -> Iterator[Sample]:

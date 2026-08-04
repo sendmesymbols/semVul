@@ -28,12 +28,22 @@ _LVL = {"none": 0, "low": 1, "medium": 2, "high": 3}
 _CONF = {"low": 0, "medium": 1, "high": 2}
 
 
+def _confidence_ord(v) -> float:
+    """Support both legacy low|medium|high strings and current numeric 0..100."""
+    if isinstance(v, (int, float)):
+        return float(np.clip(float(v), 0.0, 100.0) / 50.0)
+    try:
+        return float(np.clip(float(v), 0.0, 100.0) / 50.0)
+    except (TypeError, ValueError):
+        return float(_CONF.get(str(v).strip().lower(), 1))
+
+
 def compute(s: Sample) -> np.ndarray:
     e = s.explanation or {}
     m = e.get("code_metrics") or {}
     extra = [float(m.get(k, 0)) for k in _METRIC_KEYS] + [
         float(_LVL.get(e.get("risk_level"), 0)),
-        float(_CONF.get(e.get("confidence"), 1)),
+        _confidence_ord(e.get("confidence")),
         float(len(e.get("safety_indicators") or [])),
         float(bool(e.get("tail_facts"))),
     ]

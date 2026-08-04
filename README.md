@@ -189,3 +189,13 @@ This is a bombshell. Read FuSEVul's actual model.py forward pass carefully — l
 output = self.attention(code_output, text_output)[:, 0, :]   # fuse code + explanation
 output = self.fc1(code_output)                                # ← overwrites it; explanation discarded
 Line 28 computes the code+explanation fusion, then line 29 immediately overwrites output with fc1(code_output) — the attention result (the only place the explanation is used) is dead code, and text_output never reaches the classifier. As released, FuSEVul's model is effectively code-only; the explanation is thrown away by a bug. Let me confirm the intended architecture and the ablation numbers against the paper before I lay out what this means:
+
+
+
+
+./.venv/Scripts/python.exe experiments/fusevul_ladder/aggregate_seeds.py
+# scope it:  --datasets devign   --rungs L1 L2   --expect-seeds 1 2 3 4 5
+# persist:   --json runs/final_ladder_agg.json
+
+
+.\final_reveal_l3.ps1 -ConfidenceSwitch -ConfidenceThreshold 40 -ConfidenceTemp 8

@@ -47,18 +47,32 @@ def main():
                          "4 on >=16GB)")
     ap.add_argument("--rungs", nargs="*", default=None,
                     help="override rung list, e.g. --rungs L1 L3")
+    ap.add_argument("--code-window", choices=["head", "evidence"], default="head",
+                    help="'evidence' = 512-token window centered on the "
+                         "explanation's verbatim evidence (both datasets); the "
+                         "treatment arm for ReVeal's tail truncation")
     args = ap.parse_args()
+
+    ev = args.code_window == "evidence"
+    if ev:
+        os.environ["SEMVUL_CODE_WINDOW"] = "evidence"
+        os.environ["SEMVUL_CODE_WINDOW_WORDS"] = "340"  # ~512 GraphCodeBERT tokens
+    ga = max(1, 32 // args.batch512)
 
     from train import train_rung  # after sys.path setup
 
-    # (dataset, rungs, out_subdir, train_suffix, kwargs) — devign first: it is
-    # the dataset where extra 512-token members have the highest expected value.
+    # (dataset, rungs, out_subdir, train_suffix, kwargs). devign first: extra
+    # 512-token members have the highest expected value there. When evidence
+    # windowing is on, ReVeal also moves to a 512 window (its tail is where the
+    # defect lives) and results go to *_ev/ dirs so they don't collide with the
+    # head-truncated arm.
     jobs = [
-        ("devign", args.rungs or ["L1", "L2", "L3"], "enriched512", "clean.aug",
-         dict(max_code=512, batch=args.batch512,
-              grad_accum=max(1, 32 // args.batch512))),
-        ("reveal", args.rungs or ["L2", "L3", "L1"], "enriched", "clean",
-         dict()),
+        ("devign", args.rungs or ["L1", "L2", "L3"],
+         "enriched512_ev" if ev else "enriched512", "clean.aug",
+         dict(max_code=512, batch=args.batch512, grad_accum=ga)),
+        ("reveal", args.rungs or ["L2", "L3", "L1"],
+         "enriched_ev" if ev else "enriched", "clean",
+         dict(max_code=512, batch=args.batch512, grad_accum=ga) if ev else dict()),
     ]
     if args.only:
         jobs = [j for j in jobs if j[0] == args.only]

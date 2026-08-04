@@ -1,0 +1,8 @@
+Column
+confidence
+called_functions
+risk_summary
+risky_operations
+function_name
+missing_checks
+risky_apis

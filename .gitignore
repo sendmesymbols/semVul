@@ -24,3 +24,7 @@ models/
 # never touch data
 !data/
 !explanations/
+
+# ACTIVE/ = local readable snapshot of the 4 used files (large duplicates of
+# committed sources); keep the README, not the copies.
+explanations/SemanticVul/ACTIVE/*/*.jsonl
