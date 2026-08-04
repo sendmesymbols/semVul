@@ -9,14 +9,12 @@ env/
 *.log
 
 # generated
-experiments/cache/
-experiments/runs/
-experiments/reports/*.md
-experiments/reports/*.csv
-*.npz
 *.pt
 *.ckpt
 *.bin
+
+# large rq2 full-dataset caches (>100MB, exceed GitHub's file limit) — keep on disk, don't track
+experiments/runs/rq2_cache/*nfull*.npz
 
 # downloaded models (HuggingFace cache lives here)
 models/
@@ -25,6 +23,3 @@ models/
 !data/
 !explanations/
 
-# ACTIVE/ = local readable snapshot of the 4 used files (large duplicates of
-# committed sources); keep the README, not the copies.
-explanations/SemanticVul/ACTIVE/*/*.jsonl
