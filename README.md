@@ -380,13 +380,3 @@ argparse definitions, and the on-disk caches). Confirmed:
   `aggregate_seeds.py --json` match.
 - `generate_explanations.*` defaults (`qwen2.5-coder:14b`, `localhost:9999`,
   `mode=auto`, `num-ctx=8192`, `timeout=600`) and the six pipeline stages match.
-
-Two behaviours worth flagging:
-
-1. **Reveal auto-builds `ACTIVE/reveal`** via `apply_real_enrichment.py
-   --tail-offset 220` if absent; Devign requires `ACTIVE/devign` to pre-exist.
-2. **Cache filenames are `semanticvul_*`**; analysis scripts also accept the legacy
-   `fusevul_ladder_*` prefix. (`aggregate_seeds.py`'s docstring still says
-   `fusevul_ladder_*` — cosmetic only; the code matches both.)
-
-Nothing in the reproduction chain was found broken.
