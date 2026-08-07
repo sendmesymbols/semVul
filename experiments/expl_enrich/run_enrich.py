@@ -26,10 +26,24 @@ from src.config import EXPL_DIR
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--only", choices=["devign", "reveal"], default=None,
+                    help="restrict to one dataset (default: both)")
+    ap.add_argument("--split", choices=["train", "val"], default=None,
+                    help="restrict to one split (default: both)")
+    args = ap.parse_args()
     for ds in ("devign", "reveal"):
+        if args.only and ds != args.only:
+            continue
         for split in ("train", "val"):
+            if args.split and split != args.split:
+                continue
             src = EXPL_DIR / ds / f"{ds}_{split}.jsonl"
             dst = EXPL_DIR / ds / f"{ds}_{split}.enriched.jsonl"
+            if not src.exists():
+                print(f"[{ds}/{split}] SKIP: {src.name} not present", flush=True)
+                continue
             t0 = time.time()
             n = n_find = n_tail = 0
             with src.open("r", encoding="utf-8") as fi, \

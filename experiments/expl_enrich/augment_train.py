@@ -124,13 +124,25 @@ def main():
     ap.add_argument("--aug-copies", type=int, default=1,
                     help="extra permuted copies per devign train row (0=off)")
     ap.add_argument("--seed", type=int, default=1337)
+    ap.add_argument("--only", choices=["devign", "reveal"], default=None,
+                    help="restrict to one dataset (default: both)")
     args = ap.parse_args()
     sfx = f".{args.variant}" if args.variant else ""
 
     for ds in ("devign", "reveal"):
+        if args.only and ds != args.only:
+            continue
         rng = np.random.default_rng(args.seed)
-        train = load_jsonl(EXPL_DIR / ds / f"{ds}_train{sfx}.jsonl")
-        val = load_jsonl(EXPL_DIR / ds / f"{ds}_val{sfx}.jsonl")
+        # clean() drops train rows that leak into val, so both files are needed.
+        tp = EXPL_DIR / ds / f"{ds}_train{sfx}.jsonl"
+        vp = EXPL_DIR / ds / f"{ds}_val{sfx}.jsonl"
+        if not tp.exists() or not vp.exists():
+            missing = [p.name for p in (tp, vp) if not p.exists()]
+            print(f"[{ds}] SKIP: missing {', '.join(missing)} -- cleaning train "
+                  f"needs BOTH train and val", flush=True)
+            continue
+        train = load_jsonl(tp)
+        val = load_jsonl(vp)
         kept = clean(train, val, ds)
         out_clean = EXPL_DIR / ds / f"{ds}_train{sfx}.clean.jsonl"
         with out_clean.open("w", encoding="utf-8") as f:

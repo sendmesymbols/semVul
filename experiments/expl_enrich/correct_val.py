@@ -50,9 +50,26 @@ def load_jsonl(p):
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--only", choices=["devign", "reveal"], default=None,
+                   help="restrict to one dataset (default: both)")
+    args = ap.parse_args()
     for ds in ("devign", "reveal"):
-        train = load_jsonl(EXPL_DIR / ds / f"{ds}_train.jsonl")
-        val = load_jsonl(EXPL_DIR / ds / f"{ds}_val.jsonl")
+        if args.only and ds != args.only:
+            continue
+        # Leak/contradiction detection compares val against TRAIN, so both files
+        # must exist. A val-only regeneration cannot produce a corrected val.
+        tp = EXPL_DIR / ds / f"{ds}_train.jsonl"
+        vp = EXPL_DIR / ds / f"{ds}_val.jsonl"
+        if not tp.exists() or not vp.exists():
+            missing = [p.name for p in (tp, vp) if not p.exists()]
+            print(f"[{ds}] SKIP: missing {', '.join(missing)} -- corrected val "
+                  f"needs BOTH train and val (val rows are checked for leakage "
+                  f"against train)", flush=True)
+            continue
+        train = load_jsonl(tp)
+        val = load_jsonl(vp)
 
         train_codes = defaultdict(set)
         for r in train:

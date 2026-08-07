@@ -28,6 +28,17 @@ _LVL = {"none": 0, "low": 1, "medium": 2, "high": 3}
 _CONF = {"low": 0, "medium": 1, "high": 2}
 
 
+def _risk_level_ord(v) -> float:
+    """Case-insensitive risk_level -> 0..3.
+
+    static_enrich writes lower-case ("high"); the ACTIVE JSONLs carry upper-case
+    ("HIGH") and generate.py emits upper-case to match them. A case-sensitive
+    lookup silently returned 0 for every upper-case row, i.e. the feature was
+    dead on exactly the data in use.
+    """
+    return float(_LVL.get(str(v).strip().lower(), 0))
+
+
 def _confidence_ord(v) -> float:
     """Support both legacy low|medium|high strings and current numeric 0..100."""
     if isinstance(v, (int, float)):
@@ -42,7 +53,7 @@ def compute(s: Sample) -> np.ndarray:
     e = s.explanation or {}
     m = e.get("code_metrics") or {}
     extra = [float(m.get(k, 0)) for k in _METRIC_KEYS] + [
-        float(_LVL.get(e.get("risk_level"), 0)),
+        _risk_level_ord(e.get("risk_level")),
         _confidence_ord(e.get("confidence")),
         float(len(e.get("safety_indicators") or [])),
         float(bool(e.get("tail_facts"))),

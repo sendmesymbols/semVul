@@ -13,7 +13,7 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PY = sys.executable
-GEN = os.path.join(HERE, "generate_v2.py")
+GEN = os.path.join(os.path.dirname(HERE), "explanation", "generate.py")
 EV = os.path.join(HERE, "pilot_eval.py")
 N = "150"
 HOST = "http://localhost:9999"

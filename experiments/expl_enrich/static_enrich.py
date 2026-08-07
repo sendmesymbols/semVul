@@ -252,14 +252,18 @@ def _grounded(item: str, code: str) -> bool:
 
 
 def _risk_level(findings: List[Dict]) -> str:
+    """UPPER-CASE to match the domain the shipped ACTIVE JSONLs carry
+    (HIGH/MEDIUM/LOW) and the prompt's enum. The only consumer that compares the
+    string, src/rqs/rq1.py, lower()s first; quality_features_v2 is
+    case-insensitive."""
     if not findings:
-        return "none"
+        return "NONE"
     w = sum(f["weight"] for f in findings)
     if w >= 6:
-        return "high"
+        return "HIGH"
     if w >= 3:
-        return "medium"
-    return "low"
+        return "MEDIUM"
+    return "LOW"
 
 
 def _summary(findings, guards, tail_facts, metrics) -> str:
@@ -305,9 +309,13 @@ def enrich_row(row: dict) -> dict:
                       [g["evidence"] for g in guards]
 
     new_e = dict(e)
+    # risk_level is kept here too: the static verdict below replaces it, but
+    # explanation["confidence"] is the logprob probe of the *model's* verdict, so
+    # that verdict has to survive or the confidence loses its referent.
     new_e["llm_v1"] = dict(risky_operations=orig_risky,
                            missing_checks=orig_missing,
-                           risk_summary=e.get("risk_summary", ""))
+                           risk_summary=e.get("risk_summary", ""),
+                           risk_level=e.get("risk_level", ""))
     new_e["risky_operations"] = static_risky + [x for x in keep_risky
                                                 if x not in static_risky][:4]
     new_e["missing_checks"] = static_missing + [x for x in keep_missing
@@ -324,7 +332,14 @@ def enrich_row(row: dict) -> dict:
     new_e["code_metrics"] = ana["metrics"]
     new_e["tail_facts"] = ana["tail_facts"]
     new_e["risk_level"] = _risk_level(findings)
-    new_e["confidence"] = "high" if (findings or guards) else "medium"
+    # PRESERVE a measured confidence. experiments/explanation/generate.py writes
+    # explanation["confidence"] as an int 0..100 read from the decode-time token
+    # logprobs of the risk_level verdict; that measurement is not reproducible
+    # here, so overwriting it would destroy it. Only rows that arrive without a
+    # numeric confidence get the static fallback.
+    if not isinstance(new_e.get("confidence"), (int, float)) or \
+            isinstance(new_e.get("confidence"), bool):
+        new_e["confidence"] = "high" if (findings or guards) else "medium"
     new_e["risk_summary"] = _summary(findings, guards, ana["tail_facts"],
                                      ana["metrics"])
     new_e["enrich"] = "static-v1"

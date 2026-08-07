@@ -58,16 +58,25 @@ import urllib.request
 # ---------------------------------------------------------------------------
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))          # D:\Projects\SemVul
-EXPL_V2 = os.path.join(ROOT, "experiments", "expl_v2")
+EXPL_GEN = os.path.join(ROOT, "experiments", "explanation")
 LADDER = os.path.join(ROOT, "experiments", "fusevul_ladder")
-for _p in (ROOT, EXPL_V2, LADDER):
+for _p in (ROOT, EXPL_GEN, LADDER):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
 import src.config  # noqa: F401,E402  (sets HF_HOME/HF_HUB_CACHE before transformers)
 from src.data_io import load_split                       # noqa: E402
-from prompt_v2 import JSON_SCHEMA, build_messages         # noqa: E402  (the v2 prompt under test)
-from prompt_v2_real import build_messages as build_messages_real  # noqa: E402  (real-code variant, path C)
+# The single prompt module (experiments/explanation/prompt.py); mode="anon" is
+# the former prompt_v2, mode="real" the former prompt_v2_real.
+from prompt import JSON_SCHEMA, build_messages as _build_messages  # noqa: E402
+
+
+def build_messages(code):
+    return _build_messages(code, mode="anon")
+
+
+def build_messages_real(code):
+    return _build_messages(code, mode="real")
 
 OUT = os.path.join(HERE, "out")
 os.makedirs(OUT, exist_ok=True)

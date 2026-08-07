@@ -4,7 +4,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 DATA_DIR = ROOT / "data"
-EXPL_DIR = ROOT / "explanations" / "SemanticVul"
+
+# SEMVUL_EXPL_DIR redirects every explanation read/write (run_enrich,
+# correct_val, augment_train, apply_real_enrichment, build_prefix, data_io) at an
+# alternate tree. experiments/explanation/pipeline.py uses it to regenerate the
+# whole dataset into a work directory without touching the shipped
+# explanations/SemanticVul/. Unset = the shipped tree, exactly as before.
+EXPL_DIR = Path(os.environ.get("SEMVUL_EXPL_DIR")
+                or ROOT / "explanations" / "SemanticVul")
 
 # All HuggingFace models cache under the project (moved out of ~/.cache/huggingface).
 # Layout: models/hub/models--<owner>--<name>/...  (this is HF's own convention).
