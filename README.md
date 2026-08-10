@@ -1,6 +1,6 @@
 # SemanticVul
 
-**Quality-Aware Fusion of Code Semantics and Local Explanations for Vulnerability Detection**
+**Evidence-Grounded Structured LLM Explanations with Adaptive Gated Fusion for Vulnerability Detection**
 
 A function-level C/C++ vulnerability detector built as a controlled **L1→L3
 fusion ladder**. Local explanations are generated *offline* by Qwen2.5-Coder
