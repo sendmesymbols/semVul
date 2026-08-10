@@ -5,7 +5,7 @@
 A function-level C/C++ vulnerability detector built as a controlled **L1→L3
 fusion ladder**. Local explanations are generated *offline* by Qwen2.5-Coder
 (served through Ollama), scrubbed of verdict words and grounded in quoted code
-substrings, then fused with code semantics under a per-sample adaptive gate.
+substrings, then fused with code semantics under a quality-aware routing gate.
 Trained and evaluated on the audited **Devign** and **Reveal** benchmarks.
 
 This README is the single starting point for taking the project over. It covers
