@@ -380,3 +380,18 @@ argparse definitions, and the on-disk caches). Confirmed:
   `aggregate_seeds.py --json` match.
 - `generate_explanations.*` defaults (`qwen2.5-coder:14b`, `localhost:9999`,
   `mode=auto`, `num-ctx=8192`, `timeout=600`) and the six pipeline stages match.
+
+---
+
+## Acknowledgments
+
+This work was completed under the supervision and guidance of:
+
+- **Assoc Prof Dr. Ihtesham Ul Islam** (Supervisor) — Department of Electrical Engineering, Military College of Signals, NUST
+- **Asst Prof Dr. Rabia Khan** (Co-Supervisor) — Department of Computer Software Engineering, Military College of Signals, NUST
+
+Committee Members:
+- **Asst Prof Dr. Muhammad Sohail** — Department of Computer Software Engineering, Military College of Signals, NUST
+- **Asst Prof Dr. Nazia Bibi** — Department of Computer Software Engineering, Military College of Signals, NUST
+
+I extend our gratitude to the supervisor, co-supervisor, and committee members for their invaluable guidance, insightful feedback, and unwavering support throughout this research journey.
