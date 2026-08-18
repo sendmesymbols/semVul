@@ -220,7 +220,7 @@ def train_rung(dataset, rung, *, epochs=12, patience=3, batch=4, grad_accum=8,
     # focal="auto" preserves prior behavior (focal on ReVeal only); "on"/"off" override
     # so the RO4 focal-loss ablation can be run on Devign (currently plain CE).
     use_focal = {"on": True, "off": False}.get(focal, dataset == "reveal")
-    # ReVeal-only focal knobs (hardcoded in reproduce_reveal.ps1, no env vars).
+    # ReVeal-only focal knobs (passed by the final ReVeal launchers).
     # focal_alpha=None keeps the auto alpha; Devign (use_focal=False) is untouched.
     alpha_pos, gamma = _resolve_focal(use_focal, computed_alpha, focal_alpha, focal_gamma)
     gate_lr_mult = float(os.environ.get("SEMVUL_GATE_LR_MULT", "1.0"))

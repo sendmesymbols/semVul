@@ -88,21 +88,20 @@ semVul/
 │   ├── ACTIVE/{devign,reveal}/{train.jsonl,val.jsonl}   # <- THE files training reads
 │   └── devign/, reveal/          # canonical clean-Qwen build outputs
 │
-├── src/                          # Core library (imported as the `src` package)
+├── src/                          # Shared data/feature code + RQ analyses
 │   ├── config.py                 # paths + env-var switches (SEMVUL_*)
 │   ├── data_io.py                # dataset + ACTIVE/ JSONL loading, field rendering
-│   ├── encode_code.py            # code channel (CodeT5+ / GraphCodeBERT)
-│   ├── encode_text.py, encode_text_lora.py   # explanation (text) channel (RoBERTa)
-│   ├── model.py                  # fusion model + the L3 routing gate
-│   ├── train.py                  # training loop / per-rung trainer
-│   ├── eval.py, reports.py       # metrics + reporting
-│   ├── quality_features*.py      # label-free quality vector (legacy; proven not useful)
+│   ├── quality_features*.py      # label-free quality vectors used by L3/RQ2
 │   └── rqs/                      # ALL analysis entry points (read-only over caches)
 │       ├── aggregate_seeds.py    # headline L1–L3 five-seed aggregation
 │       ├── rq1.py rq2.py rq3.py rq4.py rq2_oracle_gate.py
 │       └── plots.py              # regenerates every RQ figure
 │
 ├── experiments/
+│   ├── fusevul_ladder/           # final detector implementation
+│   │   ├── data.py               #   L1–L3 inputs and quality features
+│   │   ├── model.py              #   encoders, fusion, and L3 routing gate
+│   │   └── train.py              #   final per-rung training loop
 │   ├── explanation/              # THE explanation generator
 │   │   ├── pipeline.py           #   3-stage orchestrator (generate/install/validate)
 │   │   ├── generate.py           #   stage 1: structured LLM generation (Ollama)
@@ -111,7 +110,6 @@ semVul/
 │   │   └── work/                 #   default (safe) build output tree
 │   ├── expl_enrich/              # final-ladder trainer wrapper (historical directory name)
 │   │   ├── reproduce_real.py     #   the trainer the final_*.ps1 launchers call
-│   │   └── make_ladder.py        #   gathers per-rung caches
 │   ├── cache/                    # frozen encoder embeddings (.npz/.npy) for RQ2/RQ4
 │   │   └── lora_ckpt/            #   *.pt LoRA checkpoints (git-ignored, ~520MB each)
 │   └── runs/                     # training outputs, one folder per run

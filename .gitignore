@@ -19,6 +19,9 @@ experiments/runs/rq2_cache/*nfull*.npz
 # downloaded models (HuggingFace cache lives here)
 models/
 
+# generated allowlisted publication bundles
+release/
+
 # never touch data
 !data/
 !explanations/
