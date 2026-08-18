@@ -7,7 +7,7 @@
 # actually moves.  No quality features (removed -- proven useless).
 # 5 seeds, 12 epochs, max_code 320 (default, matches L1/L2) + max_text 512.
 # Devign balanced -> no focal (train_rung auto-off), matching L1/L2.
-# PURE INPUT: no apply_real_enrichment.py rebuild/de-anon step. Feeds
+# PURE INPUT: no post-generation enrichment or identifier recovery. Feeds
 # ACTIVE/devign/{train,val}.jsonl exactly as they sit on disk.
 #
 #   ./final_devign_l3.sh                  # default: gate enabled, LR x100
@@ -48,9 +48,9 @@ else
     exit 1
 fi
 
-# The 8-column text channel (7-col decisive set PLUS purpose at the end; no spaces).
+# The clean Qwen-only explanation channel (no spaces).
 # IDENTICAL to final_devign_l2.sh so L2 vs L3 isolates only the gate.
-COLS="confidence,risky_operations,missing_checks,function_name,called_functions,risky_apis,risk_summary,purpose"
+COLS="confidence,purpose,data_flow,risky_operations,missing_checks,evidence_tokens,safety_indicators,risk_summary"
 
 export SEMVUL_QUAL_V2=0
 # Default: soft routing gate enabled, LR x100.
@@ -65,16 +65,11 @@ else
     unset SEMVUL_HARD_CONF_SWITCH SEMVUL_HARD_CONF_THRESH || true
 fi
 
-# No enrichment/rebuild: just require ACTIVE/devign/{train,val}.jsonl as-is.
-ACTIVE="$PWD/explanations/SemanticVul/ACTIVE/devign"
-for f in train.jsonl val.jsonl; do
-    if [[ ! -f "$ACTIVE/$f" ]]; then
-        echo "ERROR: ACTIVE/devign/$f missing -- this script does not rebuild/enhance explanations; place the pure file there first." >&2
-        exit 1
-    fi
-done
+# Reject missing or legacy enriched ACTIVE inputs before training.
+"$PY" experiments/explanation/validate_clean.py --dataset devign \
+    || { echo "ERROR: ACTIVE/devign is missing or contains legacy enriched inputs" >&2; exit 1; }
 
-# --fields $COLS: the 7-column decisive text channel (same as final_devign_l2.sh).
+# --fields $COLS: the clean Qwen-only channel (same as final_devign_l2.sh).
 # --cache-name: keep the hard-switch arm separate so resumable runs never mix
 # the clean L3 baseline with the switched variant.
 # --code-enc codet5p: CodeT5+ (FuSEVul's encoder). --max-text 512: mirror L1/L2.

@@ -10,37 +10,29 @@
 #   .\final_reveal_l1.ps1                 # batch 2 (8GB); 512-token code window
 #   .\final_reveal_l1.ps1 -Batch512 4     # >=16GB GPU
 # Resumable: a finished rung JSON is skipped -- to RETRAIN at 512, first clear/
-# rename experiments\runs\final_reveal_l1_cache (else the old 320 runs are kept).
+# Clean-Qwen results use a separate cache, so legacy runs cannot be reused.
 param([int]$Batch512 = 2, [switch]$EvidenceWindow)  # 2 fits 8GB at 512-tok code
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 $py = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 # Seeds HARDCODED (final_reveal: 5 seeds, matching final_reveal_l2/l3).
 $Seeds = @(1, 2, 3, 4, 5)
-# The 8-column text channel (7-col decisive set PLUS purpose at the end; no spaces).
+# The clean Qwen-only explanation channel (unused by L1, retained for parity).
 # L1 ignores the text channel; kept identical to L2/L3 for a uniform launcher.
-$Cols = "confidence,risky_operations,missing_checks,function_name,called_functions,risky_apis,risk_summary,purpose"
+$Cols = "confidence,purpose,data_flow,risky_operations,missing_checks,evidence_tokens,safety_indicators,risk_summary"
 
 # ---- ReVeal treatment knobs (HARDCODED; no env vars) ----
-$TailOffset = 220
 $FocalAlpha = 0.85
 $FocalGamma = 2.0
 # ---------------------------------------------------------
 
-# Self-contained: if ACTIVE\reveal\{train,val}.jsonl exist we do NOT touch the
-# enriched source files (ACTIVE already carries tail_digest). Only build when
-# ACTIVE is absent. To change $TailOffset, delete explanations\SemanticVul\
-# ACTIVE\reveal\ first so this rebuilds with the new offset.
-& $py experiments\expl_enrich\apply_real_enrichment.py --check --only reveal
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "ACTIVE/reveal missing -> building from sources (tail-offset $TailOffset)..."
-    & $py experiments\expl_enrich\apply_real_enrichment.py --only reveal --tail-offset $TailOffset
-    if ($LASTEXITCODE -ne 0) { throw "apply_real_enrichment (reveal) failed" }
-}
+# Reject missing or legacy enriched ACTIVE inputs before training.
+& $py experiments\explanation\validate_clean.py --dataset reveal
+if ($LASTEXITCODE -ne 0) { throw "ACTIVE/reveal is missing or contains legacy enriched inputs" }
 
 $seedArgs = $Seeds | ForEach-Object { "$_" }
 # --code-enc codet5p: CodeT5+ code channel (FuSEVul's encoder).
-# --cache-name final_reveal_l1_cache: fresh, independent output dir under experiments\runs\.
+# --cache-name final_reveal_l1_cache: canonical cache; the driver verifies provenance.
 # --max-text 512: FuSEVul text budget; UNIFORM across the final_reveal ladder (L1/L2/L3).
 # --epochs 12: explicit (matches train_rung default; guaranteed for this run).
 $ew = @(); if ($EvidenceWindow) { $ew = @("--evidence-window") }

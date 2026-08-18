@@ -7,7 +7,7 @@
 # launcher and a matched config across the final_devign_l{1,2,3} ladder.
 # L2 - L1 = the explanation contribution. 5 seeds, 12 epochs, max_code 512 +
 # max_text 512 (mirrors reveal / devign L2/L3).
-# PURE INPUT: no apply_real_enrichment.py rebuild/de-anon step. Feeds
+# PURE INPUT: no post-generation enrichment or identifier recovery. Feeds
 # ACTIVE/devign/{train,val}.jsonl exactly as they sit on disk.
 #
 #   ./final_devign_l1.sh                  # 5 seeds, batch 2
@@ -38,22 +38,17 @@ fi
 
 # Seeds HARDCODED: 5 seeds (matching final_reveal + final_devign_l2/l3).
 SEEDS=(1 2 3 4 5)
-# The 8-column text channel (7-col decisive set PLUS purpose at the end; no spaces).
+# The clean Qwen-only explanation channel (unused by L1, retained for parity).
 # L1 ignores the text channel; kept identical to L2/L3 for a uniform launcher.
-COLS="confidence,risky_operations,missing_checks,function_name,called_functions,risky_apis,risk_summary,purpose"
+COLS="confidence,purpose,data_flow,risky_operations,missing_checks,evidence_tokens,safety_indicators,risk_summary"
 
-# No enrichment/rebuild: just require ACTIVE/devign/{train,val}.jsonl as-is.
-ACTIVE="$PWD/explanations/SemanticVul/ACTIVE/devign"
-for f in train.jsonl val.jsonl; do
-    if [[ ! -f "$ACTIVE/$f" ]]; then
-        echo "ERROR: ACTIVE/devign/$f missing -- this script does not rebuild/enhance explanations; place the pure file there first." >&2
-        exit 1
-    fi
-done
+# Reject missing or legacy enriched ACTIVE inputs before training.
+"$PY" experiments/explanation/validate_clean.py --dataset devign \
+    || { echo "ERROR: ACTIVE/devign is missing or contains legacy enriched inputs" >&2; exit 1; }
 
 # --code-enc codet5p: CodeT5+ (FuSEVul's encoder). --max-text 512: mirror reveal
 # (both windows 512 for devign). --epochs 12: explicit. Devign balanced -> no focal.
-# --cache-name final_devign_l1_cache: fresh, independent output dir under experiments/runs/.
+# --cache-name final_devign_l1_cache: canonical cache; the driver verifies provenance.
 rc=0
 "$PY" experiments/expl_enrich/reproduce_real.py --only devign --rungs L1 \
       --cache-name final_devign_l1_cache --seeds "${SEEDS[@]}" --batch512 "$BATCH512" --fields "$COLS" \

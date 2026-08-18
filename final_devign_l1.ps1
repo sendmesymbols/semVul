@@ -6,7 +6,7 @@
 # launcher and a matched config across the final_devign_l{1,2,3} ladder.
 # L2 - L1 = the explanation contribution. 5 seeds, 12 epochs, max_code 512 +
 # max_text 512 (mirrors reveal / devign L2/L3).
-# PURE INPUT: no apply_real_enrichment.py rebuild/de-anon step. Feeds
+# PURE INPUT: no post-generation enrichment or identifier recovery. Feeds
 # ACTIVE\devign\{train,val}.jsonl exactly as they sit on disk.
 #
 #   .\final_devign_l1.ps1                 # 5 seeds, batch 2
@@ -18,22 +18,18 @@ Set-Location $PSScriptRoot
 $py = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 # Seeds HARDCODED: 5 seeds (matching final_reveal + final_devign_l2/l3).
 $Seeds = @(1, 2, 3, 4, 5)
-# The 8-column text channel (7-col decisive set PLUS purpose at the end; no spaces).
+# The clean Qwen-only explanation channel (unused by L1, retained for parity).
 # L1 ignores the text channel; kept identical to L2/L3 for a uniform launcher.
-$Cols = "confidence,risky_operations,missing_checks,function_name,called_functions,risky_apis,risk_summary,purpose"
+$Cols = "confidence,purpose,data_flow,risky_operations,missing_checks,evidence_tokens,safety_indicators,risk_summary"
 
-# No enrichment/rebuild: just require ACTIVE\devign\{train,val}.jsonl as-is.
-$active = Join-Path $PSScriptRoot "explanations\SemanticVul\ACTIVE\devign"
-foreach ($f in @("train.jsonl", "val.jsonl")) {
-    if (-not (Test-Path (Join-Path $active $f))) {
-        throw "ACTIVE\devign\$f missing -- this script does not rebuild/enhance explanations; place the pure file there first."
-    }
-}
+# Reject missing or legacy enriched ACTIVE inputs before training.
+& $py experiments\explanation\validate_clean.py --dataset devign
+if ($LASTEXITCODE -ne 0) { throw "ACTIVE/devign is missing or contains legacy enriched inputs" }
 
 $seedArgs = $Seeds | ForEach-Object { "$_" }
 # --code-enc codet5p: CodeT5+ (FuSEVul's encoder). --max-text 512: mirror reveal
 # (both windows 512 for devign). --epochs 12: explicit. Devign balanced -> no focal.
-# --cache-name final_devign_l1_cache: fresh, independent output dir under experiments\runs\.
+# --cache-name final_devign_l1_cache: canonical cache; the driver verifies provenance.
 & $py experiments\expl_enrich\reproduce_real.py --only devign --rungs L1 `
       --cache-name final_devign_l1_cache --seeds @seedArgs --batch512 $Batch512 --fields $Cols `
       --code-enc codet5p --max-text 512 --epochs 12

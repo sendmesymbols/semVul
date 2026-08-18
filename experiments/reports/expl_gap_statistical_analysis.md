@@ -79,11 +79,10 @@ strong feature the 22 v1 quality features did not include.
 
 ## 5. What was built in response
 
-- `experiments/expl_enrich/static_enrich.py` + `run_enrich.py` — deterministic,
-  label-blind enrichment: verbatim-grounded findings, present guards
-  (safety_indicators), code_metrics, calibrated risk_level, and **tail_facts**
-  describing the region beyond the encoder window. Ungrounded LLM claims are
-  filtered (originals kept under `llm_v1`). Output: `*.enriched.jsonl`.
+- A legacy deterministic post-generation enrichment pipeline produced grounded
+  findings, guard indicators, code metrics, calibrated risk levels, and tail
+  summaries. That pipeline has been removed; its outputs are incompatible with
+  the clean Qwen-only ACTIVE contract and must not be used for current results.
 - `experiments/expl_enrich/augment_train.py` — train-only cleaning
   (conflicting labels, exact-code val leaks, same-label dups → devign 21837→20658,
   reveal 18187→17692) + devign VARn/FUNn permutation augmentation

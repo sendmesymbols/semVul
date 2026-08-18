@@ -1,13 +1,10 @@
-# FINAL_DEVIGN 7-col run - Train Devign L2 (code + explanation channel)
+# FINAL_DEVIGN clean-Qwen run - Train Devign L2 (code + explanation channel)
 #   -> experiments\runs\final_devign_l2_cache\
-# Text channel = same 7 explanation columns as final_reveal_l2/l3 (8-col set
-# MINUS risk_level): confidence, risky_operations, missing_checks,
-# function_name, called_functions, risky_apis, risk_summary (via --fields
-# comma-list -> SEMVUL_EXPL_FIELDS; serialized by src/data_io.py).
+# Text channel = the validated Qwen fields listed in $Cols below.
 # L2 - L1 = the explanation contribution. Seeds are configurable via -Seeds
 # (default 1..5, matching final_devign_l1 for a paired L1->L2 delta; pass
 # -Seeds 1 for a fast single-seed run -- Devign ensemble reportedly buys ~0).
-# PURE INPUT: no apply_real_enrichment.py rebuild/de-anon step. Feeds
+# PURE INPUT: no post-generation enrichment or identifier recovery. Feeds
 # ACTIVE\devign\{train,val}.jsonl exactly as they sit on disk (data.py already
 # reads ACTIVE verbatim) -- fails loudly instead of silently regenerating them.
 #
@@ -20,21 +17,16 @@ $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 $py = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 # Seeds come from the -Seeds param (default 1..5; see header).
-# The 8-column text channel (7-col decisive set PLUS purpose at the end; no spaces).
-$Cols = "confidence,risky_operations,missing_checks,function_name,called_functions,risky_apis,risk_summary,purpose"
+# The clean Qwen-only explanation channel (no spaces).
+$Cols = "confidence,purpose,data_flow,risky_operations,missing_checks,evidence_tokens,safety_indicators,risk_summary"
 
-# No enrichment/rebuild: just require ACTIVE\devign\{train,val}.jsonl as-is.
-$active = Join-Path $PSScriptRoot "explanations\SemanticVul\ACTIVE\devign"
-foreach ($f in @("train.jsonl", "val.jsonl")) {
-    if (-not (Test-Path (Join-Path $active $f))) {
-        throw "ACTIVE\devign\$f missing -- this script does not rebuild/enhance explanations; place the pure file there first."
-    }
-}
+# Reject missing or legacy enriched ACTIVE inputs before training.
+& $py experiments\explanation\validate_clean.py --dataset devign
+if ($LASTEXITCODE -ne 0) { throw "ACTIVE/devign is missing or contains legacy enriched inputs" }
 
 $seedArgs = $Seeds | ForEach-Object { "$_" }
-# --fields $Cols: the 7-column decisive text channel (see $Cols above), same
-# columns used for final_reveal_l2/l3 instead of the round-3 "prefix" channel.
-# --cache-name final_devign_l2_cache: fresh, independent output dir under experiments\runs\.
+# --fields $Cols: the same clean Qwen-only channel used by the Reveal runs.
+# --cache-name final_devign_l2_cache: canonical cache; the driver verifies provenance.
 # --code-enc codet5p: CodeT5+ (FuSEVul's encoder). --max-text 512: mirror reveal
 # (both windows 512 for devign; heavier -> lower -Batch512 if VRAM-bound).
 # --epochs 12: explicit. Devign is balanced -> no focal (train_rung auto-off).

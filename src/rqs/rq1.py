@@ -56,14 +56,14 @@ from src.data_io import _to_str, _to_list
 
 DATASETS = ("reveal", "devign")
 
-# The 7-column channel actually fed to the model (final_*_l{2,3}.ps1): the 8-col
-# set MINUS risk_level (risk_level is the scrubbed verdict field). This is the
-# "verdict scrubbed" surface RQ1 audits.
-FED_FIELDS = ("confidence", "risky_operations", "missing_checks", "function_name",
-              "called_functions", "risky_apis", "risk_summary", "purpose")
+# The clean Qwen-only channel fed by final_*_l{2,3}; risk_level stays outside
+# the detector channel because it is the generator's pseudo-verdict.
+FED_FIELDS = ("confidence", "purpose", "data_flow", "risky_operations",
+              "missing_checks", "evidence_tokens", "safety_indicators",
+              "risk_summary")
 
 # Pre-scrub fields kept OUT of the channel -- audited to show what the scrub removed.
-RAW_ONLY_FIELDS = ("risk_level", "llm_v1")
+RAW_ONLY_FIELDS = ("risk_level",)
 
 # Explicit vuln/safe verdict assertions. Presence in the FED text = a surviving
 # verdict; correlation with the label = whether it actually leaks.

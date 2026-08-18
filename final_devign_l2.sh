@@ -1,14 +1,11 @@
 #!/usr/bin/env bash
-# FINAL_DEVIGN 7-col run - Train Devign L2 (code + explanation channel)
+# FINAL_DEVIGN clean-Qwen run - Train Devign L2 (code + explanation channel)
 #   -> experiments/runs/final_devign_l2_cache/
-# Text channel = same 7 explanation columns as final_reveal_l2/l3 (8-col set
-# MINUS risk_level): confidence, risky_operations, missing_checks,
-# function_name, called_functions, risky_apis, risk_summary (via --fields
-# comma-list -> SEMVUL_EXPL_FIELDS; serialized by src/data_io.py).
+# Text channel = the validated Qwen fields listed in COLS below.
 # L2 - L1 = the explanation contribution. Seeds are configurable via --seeds
 # (default 1..5, matching final_devign_l1 for a paired L1->L2 delta; pass
 # --seeds 1 for a fast single-seed run -- Devign ensemble reportedly buys ~0).
-# PURE INPUT: no apply_real_enrichment.py rebuild/de-anon step. Feeds
+# PURE INPUT: no post-generation enrichment or identifier recovery. Feeds
 # ACTIVE/devign/{train,val}.jsonl exactly as they sit on disk (data.py already
 # reads ACTIVE verbatim) -- fails loudly instead of silently regenerating them.
 #
@@ -42,21 +39,15 @@ else
     exit 1
 fi
 
-# The 8-column text channel (7-col decisive set PLUS purpose at the end; no spaces).
-COLS="confidence,risky_operations,missing_checks,function_name,called_functions,risky_apis,risk_summary,purpose"
+# The clean Qwen-only explanation channel (no spaces).
+COLS="confidence,purpose,data_flow,risky_operations,missing_checks,evidence_tokens,safety_indicators,risk_summary"
 
-# No enrichment/rebuild: just require ACTIVE/devign/{train,val}.jsonl as-is.
-ACTIVE="$PWD/explanations/SemanticVul/ACTIVE/devign"
-for f in train.jsonl val.jsonl; do
-    if [[ ! -f "$ACTIVE/$f" ]]; then
-        echo "ERROR: ACTIVE/devign/$f missing -- this script does not rebuild/enhance explanations; place the pure file there first." >&2
-        exit 1
-    fi
-done
+# Reject missing or legacy enriched ACTIVE inputs before training.
+"$PY" experiments/explanation/validate_clean.py --dataset devign \
+    || { echo "ERROR: ACTIVE/devign is missing or contains legacy enriched inputs" >&2; exit 1; }
 
-# --fields $COLS: the 7-column decisive text channel (see COLS above), same
-# columns used for final_reveal_l2/l3 instead of the round-3 "prefix" channel.
-# --cache-name final_devign_l2_cache: fresh, independent output dir under experiments/runs/.
+# --fields $COLS: the same clean Qwen-only channel used by the Reveal runs.
+# --cache-name final_devign_l2_cache: canonical cache; the driver verifies provenance.
 # --code-enc codet5p: CodeT5+ (FuSEVul's encoder). --max-text 512: mirror reveal
 # (both windows 512 for devign; heavier -> lower --batch512 if VRAM-bound).
 # --epochs 12: explicit. Devign is balanced -> no focal (train_rung auto-off).

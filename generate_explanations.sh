@@ -1,20 +1,13 @@
 #!/usr/bin/env bash
 # GENERATE EXPLANATIONS - THE single entry point for the explanation dataset.
 #
-# Runs all six stages and ends with a complete ACTIVE/ pair per dataset, carrying
-# every explanation.* column the training wrappers read:
+# Runs three stages and ends with a clean ACTIVE/ pair per dataset:
 #
 #   1 generate    purpose, data_flow, risky_operations, missing_checks,
 #                 evidence_tokens, safety_indicators, risk_summary, risk_level,
 #                 confidence  (MEASURED from decode-time logprobs, not self-reported)
-#   2 install     stage-1 output -> the filename later stages read
-#   3 enrich      llm_v1, code_metrics, tail_facts, enrich
-#   4 clean/aug   the .clean / .clean.aug variants ACTIVE is built from
-#   5 real        function_name, called_functions, risky_apis, string_literals,
-#                 lexical_digest, real_enrich, tail_digest
-#   6 prefix      prefix, prefix_recipe  + ACTIVE/README.md
-#
-# organize_explanations.ps1 is NOT needed any more -- it was stages 5/6 by hand.
+#   2 install     stage-1 output -> canonical dataset files
+#   3 activate    validate Qwen-only fields and copy to ACTIVE/
 #
 # By default it builds into experiments/explanation/work/ and does NOT touch the
 # shipped explanations/SemanticVul/. Pass --promote to build in the shipped tree.
@@ -43,7 +36,7 @@ while [[ $# -gt 0 ]]; do
         --host)        OLLAMA_HOST="$2"; PASS+=(--host "$2"); shift 2 ;;
         --from-stage)  FROM_STAGE="$2"; PASS+=(--from-stage "$2"); shift 2 ;;
         --dataset|--split|--mode|--stratified|--workers|--num-ctx|--timeout|\
-        --tag|--work-dir|--to-stage|--aug-copies|--tail-offset)
+        --tag|--work-dir|--to-stage)
                        PASS+=("$1" "$2"); shift 2 ;;
         --no-think|--smoke|--promote)
                        PASS+=("$1"); shift ;;
@@ -52,8 +45,8 @@ while [[ $# -gt 0 ]]; do
            echo "Supported: --dataset devign|reveal|both --split train|val|both" >&2
            echo "           --model M --host URL --mode auto|anon|real" >&2
            echo "           --stratified N --workers N --num-ctx N --timeout S --tag T" >&2
-           echo "           --work-dir D --from-stage 1-6 --to-stage 1-6" >&2
-           echo "           --aug-copies N --tail-offset N --no-think --smoke --promote" >&2
+           echo "           --work-dir D --from-stage 1-3 --to-stage 1-3" >&2
+           echo "           --no-think --smoke --promote" >&2
            exit 1 ;;
     esac
 done

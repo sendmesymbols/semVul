@@ -169,7 +169,7 @@ TRAIN THE SIX FINAL CACHES  (GPU; no LLM needed):
   Devign : code window 512 (reproducer default); balanced -> plain cross-entropy.
            Requires ACTIVE/devign to already exist (does NOT rebuild it).
   Reveal : --max-code 512, --focal-alpha 0.85, --focal-gamma 2.0, tail-offset 220.
-           Auto-builds ACTIVE/reveal via apply_real_enrichment.py if absent.
+           Requires validated Qwen-only ACTIVE/reveal inputs; it never auto-builds them.
   L3     : SEMVUL_QUAL_V2=0, SEMVUL_QUAL_GATE=1, SEMVUL_GATE_LR_MULT=100,
            --qual-gate. Encoders fine-tune (same regime as L1/L2).
 

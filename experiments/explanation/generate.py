@@ -3,7 +3,7 @@
 Replaces expl_v2/generate_v2.py. Two things changed:
 
 1. ONE prompt module (experiments/explanation/prompt.py) covering both the
-   anonymized (Devign) and real-identifier (ReVeal / de-anonymized) forms.
+   anonymized (Devign) and real-identifier (ReVeal) forms.
 
 2. `explanation.confidence` is MEASURED, not asked for. The request sets
    logprobs=true, and probe_confidence() reads the decode-time token
@@ -21,12 +21,8 @@ Output row schema (matches the ACTIVE JSONL columns the LLM stage owns):
                 confidence},
     meta{model, prompt, mode, gen_seconds, confidence_probe{...}}
 
-Downstream stages add the remaining explanation.* columns:
-    expl_enrich/static_enrich.py      -> llm_v1, code_metrics, tail_facts, enrich
-    expl_enrich/apply_real_enrichment -> function_name, called_functions,
-                                         risky_apis, string_literals,
-                                         lexical_digest, real_enrich, tail_digest
-    ladder builder                    -> prefix, prefix_recipe
+The generated object is grounded and verdict-scrubbed here before it is written.
+No downstream enrichment stage rewrites or supplements explanation fields.
 
 Resumable: sample_ids already present in the output file are skipped.
 
@@ -204,10 +200,9 @@ def grounding_stats(expl: dict, code: str) -> dict:
     """How many quoted fragments really occur in this function.
 
     A model that copies evidence out of the few-shot exemplars scores < 1.0 here.
-    Diagnostic only -- the actual drop happens in expl_enrich/static_enrich.py,
-    which keeps the raw claim in explanation["llm_v1"]. Reported so few-shot
-    leakage is measurable instead of silent, because `confidence` probes the
-    verdict the model reached FROM these quotes.
+    The generation loop uses this measurement to trigger one regeneration when
+    most evidence is unsupported. validate_explanation() then drops unsupported
+    evidence and the claims directly attached to it.
 
     Matching is WHITESPACE-INSENSITIVE. Models reflow the spacing of the
     tokenized C ("for ( c = a ; c <= b ; c ++ )" vs the source's line breaks);
@@ -224,6 +219,64 @@ def grounding_stats(expl: dict, code: str) -> dict:
     exact = sum(1 for s in ev if s in code)
     return {"evidence_total": len(ev), "evidence_grounded": hit,
             "evidence_exact": exact, "grounded_frac": round(hit / len(ev), 4)}
+
+
+_IDENT = re.compile(r"\b[A-Za-z_]\w*\b")
+_VERDICT = re.compile(
+    r"\b(vulnerab(?:le|ility|ilities)?|safe|secure|exploit(?:ed|able|ation)?|"
+    r"attacker|malicious|cwe[-_ ]?\d*)\b", re.I)
+
+
+def _grounded(fragment: str, code: str) -> bool:
+    return bool(fragment) and _WS.sub("", fragment) in _WS.sub("", code)
+
+
+def _scrub(text: str) -> str:
+    return _WS.sub(" ", _VERDICT.sub("[redacted]", text)).strip()
+
+
+def validate_explanation(expl: dict, code: str) -> dict:
+    """Drop unsupported evidence-linked claims and scrub verdict vocabulary."""
+    out = dict(expl)
+    out["evidence_tokens"] = [
+        token for token in (expl.get("evidence_tokens") or [])
+        if _grounded(str(token), code)
+    ]
+
+    risky = []
+    for claim in expl.get("risky_operations") or []:
+        text = str(claim)
+        match = re.search(r"\[evidence:\s*(.*?)\]\s*$", text, re.I)
+        if not match or not _grounded(match.group(1), code):
+            continue
+        prefix = _scrub(text[:match.start()].strip())
+        if prefix:
+            risky.append(f"{prefix} [evidence: {match.group(1)}]")
+    out["risky_operations"] = risky
+
+    guards = []
+    for guard in expl.get("safety_indicators") or []:
+        if not isinstance(guard, dict) or not _grounded(str(guard.get("evidence", "")), code):
+            continue
+        guards.append({"check": _scrub(str(guard.get("check", ""))),
+                       "evidence": str(guard.get("evidence", ""))})
+    out["safety_indicators"] = guards
+
+    # missing_checks has no per-item evidence field in the published schema.
+    # Retain only claims that mention an identifier present in code and only
+    # when at least one grounded evidence anchor survived.
+    missing = []
+    if out["evidence_tokens"]:
+        for claim in expl.get("missing_checks") or []:
+            text = str(claim)
+            identifiers = [x for x in _IDENT.findall(text) if len(x) > 2]
+            if identifiers and any(x in code for x in identifiers):
+                missing.append(_scrub(text))
+    out["missing_checks"] = missing
+
+    for field in ("purpose", "data_flow", "risk_summary"):
+        out[field] = _scrub(str(out.get(field, "")))
+    return out
 
 
 def normalize_explanation(raw: dict) -> dict:
@@ -362,8 +415,12 @@ def main():
                                    args.num_ctx, args.timeout, args.no_think,
                                    args.top_logprobs)
                 dur_s = time.time() - t1
-                expl = normalize_explanation(
-                    json.loads(resp["message"]["content"]))
+                expl = normalize_explanation(json.loads(resp["message"]["content"]))
+                raw_grounding = grounding_stats(expl, s.code)
+                if attempt == 1 and raw_grounding["evidence_total"] and \
+                        (raw_grounding["grounded_frac"] or 0.0) < 0.5:
+                    continue
+                expl = validate_explanation(expl, s.code)
                 probe = probe_confidence(resp.get("logprobs"))
                 expl["confidence"] = probe["confidence"]
                 return {
@@ -411,17 +468,12 @@ def main():
           f"no-confidence={n_noconf} "
           f"elapsed={(time.time() - t0) / 60:.1f} min -> {out_path}", flush=True)
     if n_noconf:
-        # Loud, because it is silent downstream: static_enrich fills a missing
-        # confidence with the string "high"/"medium", so the column would still
-        # be *present* -- just a self-report string instead of a measurement,
-        # breaking the int type the ACTIVE JSONLs carry.
         print(f"[gen] WARNING: {n_noconf}/{n_ok} rows carry NO measured "
               f"confidence -- the server returned no usable logprobs.\n"
               f"[gen]          Ollama must support logprobs on /api/chat "
               f"(verified on 0.30.0-rc17); check the server version and that "
-              f"model '{args.model}' returns them.\n"
-              f"[gen]          Those rows will get a STRING fallback from "
-              f"static_enrich, not a probe value.", flush=True)
+              f"model '{args.model}' returns them. Those rows remain null and "
+              f"validate_clean.py will reject them before final training.", flush=True)
 
 
 if __name__ == "__main__":

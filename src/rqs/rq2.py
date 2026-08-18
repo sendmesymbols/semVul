@@ -34,7 +34,7 @@ from datetime import datetime, timezone
 # env MUST be set before importing project data (data.py binds the qual builder
 # at import time based on SEMVUL_QUAL_V2).
 os.environ.setdefault("SEMVUL_ACTIVE_DIR", "1")
-os.environ["SEMVUL_QUAL_V2"] = "0"                       # v1-only (label-free, no leaky v2 block)
+os.environ["SEMVUL_QUAL_V2"] = "0"
 os.environ.setdefault("SEMVUL_QUAL_SET", "B")            # grounding + specificity (5 feats)
 os.environ.setdefault("SEMVUL_EXPL_FIELDS",
     "confidence,risky_operations,missing_checks,function_name,"

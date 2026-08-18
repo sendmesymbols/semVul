@@ -5,8 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 DATA_DIR = ROOT / "data"
 
-# SEMVUL_EXPL_DIR redirects every explanation read/write (run_enrich,
-# correct_val, augment_train, apply_real_enrichment, build_prefix, data_io) at an
+# SEMVUL_EXPL_DIR redirects explanation generation and data loading at an
 # alternate tree. experiments/explanation/pipeline.py uses it to regenerate the
 # whole dataset into a work directory without touching the shipped
 # explanations/SemanticVul/. Unset = the shipped tree, exactly as before.

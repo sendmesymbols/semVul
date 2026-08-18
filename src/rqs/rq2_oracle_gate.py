@@ -5,15 +5,6 @@ whether to trust the code embedding or the explanation embedding -- using
 ReVeal's raw explanation.confidence field as the switch -- would that beat
 L2 (static_concat) / L3 (gated)?
 
-CAVEAT -- read before trusting any number this prints: ReVeal's ACTIVE
-explanation.confidence is NOT organic. It is a label-conditioned synthetic
-value produced by fill_data.py (confidence->label AUC ~0.87 on val; mean
-confidence ~69 for label=1 vs ~38 for label=0). So "oracle beats L2" here is
-evidence about how exploitable that synthetic leak is, NOT evidence that
-quality-aware gating works. Never report these numbers as an architecture
-contribution without this caveat attached. See memory
-reveal-confidence-synthetic-injection for the full provenance trace.
-
 Three variants, all off the SAME frozen cache rq2.py already builds:
   A  code_only   (existing rq2.py mode, unchanged)
   B  text_only   (existing rq2.py mode, unchanged)

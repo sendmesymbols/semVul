@@ -6,7 +6,7 @@
 # actually moves.  No quality features (removed -- proven useless).
 # 5 seeds, 12 epochs, max_code 320 (default, matches L1/L2) + max_text 512.
 # Devign balanced -> no focal (train_rung auto-off), matching L1/L2.
-# PURE INPUT: no apply_real_enrichment.py rebuild/de-anon step. Feeds
+# PURE INPUT: no post-generation enrichment or identifier recovery. Feeds
 # ACTIVE\devign\{train,val}.jsonl exactly as they sit on disk.
 #
 #   .\final_devign_l3.ps1                 # default: gate enabled, LR x100
@@ -26,9 +26,9 @@ param(
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 $py = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
-# The 8-column text channel (7-col decisive set PLUS purpose at the end; no spaces).
+# The clean Qwen-only explanation channel (no spaces).
 # IDENTICAL to final_devign_l2.ps1 so L2 vs L3 isolates only the gate.
-$Cols = "confidence,risky_operations,missing_checks,function_name,called_functions,risky_apis,risk_summary,purpose"
+$Cols = "confidence,purpose,data_flow,risky_operations,missing_checks,evidence_tokens,safety_indicators,risk_summary"
 
 $env:SEMVUL_QUAL_V2 = "0"
 # Default: soft routing gate enabled (SEMVUL_QUAL_GATE=1), LR x100 so it moves.
@@ -45,18 +45,14 @@ if ($HardConfSwitch) {
     Remove-Item Env:SEMVUL_HARD_CONF_THRESH -ErrorAction SilentlyContinue
 }
 
-# No enrichment/rebuild: just require ACTIVE\devign\{train,val}.jsonl as-is.
-$active = Join-Path $PSScriptRoot "explanations\SemanticVul\ACTIVE\devign"
-foreach ($f in @("train.jsonl", "val.jsonl")) {
-    if (-not (Test-Path (Join-Path $active $f))) {
-        throw "ACTIVE\devign\$f missing -- this script does not rebuild/enhance explanations; place the pure file there first."
-    }
-}
+# Reject missing or legacy enriched ACTIVE inputs before training.
+& $py experiments\explanation\validate_clean.py --dataset devign
+if ($LASTEXITCODE -ne 0) { throw "ACTIVE/devign is missing or contains legacy enriched inputs" }
 
 $seedArgs = $Seeds | ForEach-Object { "$_" }
 $CacheName = if ($HardConfSwitch) { "final_devign_l3_hardswitch_cache" } else { "final_devign_l3_cache" }
 $gateFlag = @(); if (-not $HardConfSwitch) { $gateFlag = @("--qual-gate") }
-# --fields $Cols: the 7-column decisive text channel (same as final_devign_l2.ps1).
+# --fields $Cols: the clean Qwen-only channel (same as final_devign_l2.ps1).
 # --cache-name: keep the hard-switch arm separate so resumable runs never mix
 # the clean L3 baseline with the switched variant.
 # --code-enc codet5p: CodeT5+ (FuSEVul's encoder). --max-text 512: mirror L1/L2.

@@ -31,7 +31,7 @@ _CONF = {"low": 0, "medium": 1, "high": 2}
 def _risk_level_ord(v) -> float:
     """Case-insensitive risk_level -> 0..3.
 
-    static_enrich writes lower-case ("high"); the ACTIVE JSONLs carry upper-case
+    Legacy files may use lower-case ("high"); clean Qwen ACTIVE JSONLs use upper-case
     ("HIGH") and generate.py emits upper-case to match them. A case-sensitive
     lookup silently returned 0 for every upper-case row, i.e. the feature was
     dead on exactly the data in use.

@@ -3,11 +3,8 @@
 Each JSONL row: {sample_id, label (0/1), raw_code, explanation: {purpose,
 data_flow, risky_operations[], missing_checks[], evidence_tokens[], risk_summary}}
 
-Variant selection: set SEMVUL_EXPL_VARIANT=enriched to load
-<ds>_<split>.enriched.jsonl (written by experiments/expl_enrich/run_enrich.py)
-instead of the original files. Enriched rows carry extra fields
-(safety_indicators, tail_facts, risk_level, code_metrics) which
-explanation_text folds into the text channel when present.
+Final runs select validated Qwen-only files from ACTIVE/. Legacy variant
+selection remains only for archived exploratory scripts.
 """
 import json
 import os
@@ -100,8 +97,7 @@ def _render_expl_field(e: dict, name: str) -> str:
         return _to_str(e.get("risk_summary"))
     if name == "evidence_tokens":
         return " ".join(_to_list(e.get("evidence_tokens")))
-    # real-code enrichment fields (2026-07-08 *.real.jsonl: lexical_digest,
-    # function_name, called_functions, ...) and any future keys: emit verbatim.
+    # Any explicitly selected future generator field: emit verbatim.
     return _to_str(e.get(name))
 
 
@@ -132,8 +128,7 @@ def _jsonl_path(dataset: str, split: str) -> Path:
         return ap
     variant = os.environ.get("SEMVUL_EXPL_VARIANT", "").strip()
     if split == "val":
-        # SEMVUL_VAL_VARIANT lets val use a treated variant (e.g. enriched.real)
-        # while SEMVUL_TRAIN_SUFFIX independently picks the train file.
+        # Legacy exploratory variants; final launchers select ACTIVE instead.
         variant = os.environ.get("SEMVUL_VAL_VARIANT", "").strip() or variant
     suffix = f".{variant}" if variant else ""
     p = EXPL_DIR / dataset / f"{dataset}_{split}{suffix}.jsonl"

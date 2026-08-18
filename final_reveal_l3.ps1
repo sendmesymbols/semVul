@@ -24,12 +24,11 @@ Set-Location $PSScriptRoot
 $py = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 # Seeds HARDCODED (final_reveal: 5 seeds, matching final_reveal_l1/l2).
 $Seeds = @(1, 2, 3, 4, 5)
-# The 8-column text channel (7-col decisive set PLUS purpose at the end; no spaces).
+# The clean Qwen-only explanation channel (no spaces).
 # IDENTICAL to final_reveal_l2.ps1 so L2 vs L3 isolates only the gate.
-$Cols = "confidence,risky_operations,missing_checks,function_name,called_functions,risky_apis,risk_summary,purpose"
+$Cols = "confidence,purpose,data_flow,risky_operations,missing_checks,evidence_tokens,safety_indicators,risk_summary"
 
 # ---- ReVeal treatment knobs (HARDCODED; IDENTICAL to final_reveal_l2.ps1) ----
-$TailOffset = 220
 $FocalAlpha = 0.85
 $FocalGamma = 2.0
 # -------------------------------------------------------------------------
@@ -49,16 +48,9 @@ if ($HardConfSwitch) {
     Remove-Item Env:SEMVUL_HARD_CONF_THRESH -ErrorAction SilentlyContinue
 }
 
-# Self-contained: if ACTIVE\reveal\{train,val}.jsonl exist we do NOT touch the
-# enriched source files (ACTIVE already carries tail_digest). Only build when
-# ACTIVE is absent. To change $TailOffset, delete explanations\SemanticVul\
-# ACTIVE\reveal\ first so this rebuilds with the new offset.
-& $py experiments\expl_enrich\apply_real_enrichment.py --check --only reveal
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "ACTIVE/reveal missing -> building from sources (tail-offset $TailOffset)..."
-    & $py experiments\expl_enrich\apply_real_enrichment.py --only reveal --tail-offset $TailOffset
-    if ($LASTEXITCODE -ne 0) { throw "apply_real_enrichment (reveal) failed" }
-}
+# Reject missing or legacy enriched ACTIVE inputs before training.
+& $py experiments\explanation\validate_clean.py --dataset reveal
+if ($LASTEXITCODE -ne 0) { throw "ACTIVE/reveal is missing or contains legacy enriched inputs" }
 
 $seedArgs = $Seeds | ForEach-Object { "$_" }
 $CacheName = if ($HardConfSwitch) { "final_reveal_l3_hardswitch_cache" }

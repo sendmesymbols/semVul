@@ -1,17 +1,13 @@
 #!/usr/bin/env bash
-# FINAL_REVEAL 7-col run - Train ReVeal L2 (code + explanation channel)
+# FINAL_REVEAL clean-Qwen run - Train ReVeal L2 (code + explanation channel)
 #   -> experiments/runs/final_reveal_l2_cache/
-# Text channel = 7 explanation columns (8-col set MINUS risk_level):
-#   confidence, risky_operations, missing_checks, function_name,
-#   called_functions, risky_apis, risk_summary   (via --fields comma-list ->
-#   SEMVUL_EXPL_FIELDS; serialized by src/data_io.py). Focal loss knobs below.
+# Text channel contains generator-produced structured fields only.
 #   L2 - L1 = the explanation contribution. 5 seeds, 12 epochs (overnight).
 #   max-code 512 + max-text 512 (matches FuSEVul + devign).
 #
 #   ./final_reveal_l2.sh                  # batch 2 (8GB); 512-token code window
 #   ./final_reveal_l2.sh --batch512 4     # >=16GB GPU
-# Resumable: a finished rung JSON is skipped -- to RETRAIN at 512, first clear/
-# rename experiments/runs/final_reveal_l2_cache (else the old 320 runs are kept).
+# Resumable within the clean-Qwen cache family.
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 
@@ -37,31 +33,23 @@ else
     exit 1
 fi
 
-# Seeds HARDCODED. s1,s2 already complete in final_reveal_l2_cache (final JSON
-# present) -> resume logic skips them; only s3,s4,s5 train. 5 seeds => stability.
+# Five fixed seeds for a paired ladder comparison.
 SEEDS=(1 2 3 4 5)
-# The 8-column text channel (7-col decisive set PLUS purpose at the end; no spaces).
-COLS="confidence,risky_operations,missing_checks,function_name,called_functions,risky_apis,risk_summary,purpose"
+# Qwen-only structured text channel; risk_level is deliberately excluded.
+COLS="confidence,purpose,data_flow,risky_operations,missing_checks,evidence_tokens,safety_indicators,risk_summary"
 
 # ---- ReVeal treatment knobs (HARDCODED; no env vars) ----
-TAIL_OFFSET=220
 FOCAL_ALPHA=0.85
 FOCAL_GAMMA=2.0
 # ---------------------------------------------------------
 
-# Self-contained: if ACTIVE/reveal/{train,val}.jsonl exist we do NOT touch the
-# enriched source files (ACTIVE already carries tail_digest). Only build when
-# ACTIVE is absent. To change TAIL_OFFSET, delete explanations/SemanticVul/
-# ACTIVE/reveal/ first so this rebuilds with the new offset.
-if ! "$PY" experiments/expl_enrich/apply_real_enrichment.py --check --only reveal; then
-    echo "ACTIVE/reveal missing -> building from sources (tail-offset $TAIL_OFFSET)..."
-    "$PY" experiments/expl_enrich/apply_real_enrichment.py --only reveal --tail-offset "$TAIL_OFFSET" \
-        || { echo "ERROR: apply_real_enrichment (reveal) failed" >&2; exit 1; }
-fi
+# Reject missing or legacy enriched ACTIVE inputs before training.
+"$PY" experiments/explanation/validate_clean.py --dataset reveal \
+    || { echo "ERROR: ACTIVE/reveal is missing or contains legacy enriched inputs" >&2; exit 1; }
 
-# --fields $COLS: the 7-column decisive text channel (see COLS above).
-# --cache-name final_reveal_l2_cache: fresh, independent output dir under experiments/runs/.
-# --max-text 512: FuSEVul text budget; the 7 columns are short so this is ample.
+# --fields $COLS: generator-produced structured fields only.
+# --cache-name final_reveal_l2_cache: canonical cache; the driver verifies provenance.
+# --max-text 512: FuSEVul text budget.
 # --epochs 12: explicit (matches train_rung default; guaranteed for this run).
 # --evidence-window (opt-in A/B): evidence-centered code span for L2/L3.
 rc=0

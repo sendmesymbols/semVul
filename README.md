@@ -8,6 +8,13 @@ fusion ladder**. Local explanations are generated *offline* by Qwen2.5-Coder
 substrings, then fused with code semantics under a quality-aware routing gate.
 Trained and evaluated on the audited **Devign** and **Reveal** benchmarks.
 
+> **Result-provenance hold.** The checked-in `ACTIVE/` rows and the existing
+> `experiments/runs/final_*_cache` results predate removal of deterministic
+> post-generation enrichment. They reproduce the historical results only; they
+> are not evidence for the clean Qwen-only pipeline described below. Regenerate
+> `ACTIVE/` and rerun all six canonical caches before using the numbers in a new
+> paper submission.
+
 This README is the single starting point for taking the project over. It covers
 what the project is (aim, objectives, questions), the folder/file layout, the
 environment setup, and step-by-step reproduction of explanation generation, the
@@ -47,7 +54,7 @@ The objectives (RO) and questions (RQ) are paired one-to-one:
 | **1** | Design & evaluate a local explanation pipeline using structured JSON output, evidence-token grounding, and explicit leakage controls. | To what extent do locally generated, verdict-scrubbed, evidence-grounded explanations improve explanation faithfulness and downstream detection utility vs FuSEVul-style free-form LLM explanations? | `generate_explanations.*` + `src/rqs/rq1.py` |
 | **2** | Develop & evaluate a lightweight gated fusion module over cached code embeddings, explanation embeddings, and label-free quality features. | How does quality-aware adaptive gated fusion compare with static fusion, single-modality models, and classical cached-feature baselines in performance and training efficiency? | `src/rqs/rq2.py` (+ `rq2_oracle_gate.py`) |
 | **3** | Evaluate SemanticVul against FuSEVul and baselines under audited, explicitly declared protocols. | Under the audited Devign/Reveal splits, how does SemanticVul compare with FuSEVul and baselines in predictive performance, threshold robustness, and low-resource feasibility? | `src/rqs/rq3.py` + `aggregate_seeds.py` |
-| **4** | Investigate focal loss, capped class weighting, validation-based threshold tuning, and multi-seed ensembling via controlled ablations. | What are the individual and combined effects of imbalance-aware loss, threshold tuning, and multi-seed ensembling on minority-class detection and the P/R trade-off? | `src/rqs/rq4.py` |
+| **4** | Evaluate operating-point choices and multi-seed ensembling under class imbalance. | How do the fixed focal-loss recipe, validation-based threshold tuning, and ensembling change minority-class performance and the precision/recall trade-off? | `src/rqs/rq4.py` |
 
 ### The L1–L3 ladder (spine of the whole project)
 
@@ -79,8 +86,7 @@ semVul/
 │
 ├── explanations/SemanticVul/     # Generated explanation datasets (JSONL)
 │   ├── ACTIVE/{devign,reveal}/{train.jsonl,val.jsonl}   # <- THE files training reads
-│   ├── devign/, reveal/          # long-named canonical build outputs + full_code/
-│   └── devign_real/              # read-only de-anonymisation inputs (stage 5 needs these)
+│   └── devign/, reveal/          # canonical clean-Qwen build outputs
 │
 ├── src/                          # Core library (imported as the `src` package)
 │   ├── config.py                 # paths + env-var switches (SEMVUL_*)
@@ -98,14 +104,13 @@ semVul/
 │
 ├── experiments/
 │   ├── explanation/              # THE explanation generator
-│   │   ├── pipeline.py           #   6-stage orchestrator (generate → … → prefix)
+│   │   ├── pipeline.py           #   3-stage orchestrator (generate/install/validate)
 │   │   ├── generate.py           #   stage 1: structured LLM generation (Ollama)
 │   │   ├── prompt.py             #   the structured JSON prompt (no label, no verdict words)
+│   │   ├── validate_clean.py      #   rejects missing/legacy ACTIVE fields
 │   │   └── work/                 #   default (safe) build output tree
-│   ├── expl_enrich/              # explanation post-processing + the trainer wrapper
+│   ├── expl_enrich/              # final-ladder trainer wrapper (historical directory name)
 │   │   ├── reproduce_real.py     #   the trainer the final_*.ps1 launchers call
-│   │   ├── apply_real_enrichment.py  # builds ACTIVE/ (stage 5); reveal prereq
-│   │   ├── run_enrich.py static_enrich.py correct_val.py augment_train.py build_prefix.py
 │   │   └── make_ladder.py        #   gathers per-rung caches
 │   ├── cache/                    # frozen encoder embeddings (.npz/.npy) for RQ2/RQ4
 │   │   └── lora_ckpt/            #   *.pt LoRA checkpoints (git-ignored, ~520MB each)
@@ -168,39 +173,32 @@ Key packages: `transformers`, `peft`, `sentence-transformers`, `scikit-learn`,
 `numpy`, `pandas`, `scipy`. (`requirements.txt` is UTF-16 encoded — `pip` reads it
 fine; a plain text editor may show a BOM.)
 
-> **GPU-free path.** The RQ/RO analyses in `src/rqs/` are *read-only over the
-> committed caches* and need **no GPU and no training** — you can reproduce every
-> headline number and figure ([§6](#6-reproduce--the-rq--ro-analyses-and-figures))
-> on CPU as long as `experiments/runs/final_*` and `experiments/cache/` are present
-> (they ship in the repo).
+> **GPU-free historical path.** The RQ/RO analyses in `src/rqs/` are read-only
+> over the committed caches and need no GPU. They reproduce the historical
+> numbers, not yet the clean-Qwen experiment. Clean headline numbers require the
+> regeneration and six training runs described below.
 
 ---
 
 ## 4. Reproduce — explanation generation (RO1 / RQ1)
 
-> **Slow, optional.** The shipped `ACTIVE/` files already contain the final
-> generated set. You do **not** need to regenerate to reproduce training or the
-> RQs — use `-Smoke` only to prove the pipeline works end-to-end.
+> **Required for clean results.** The shipped `ACTIVE/` files contain legacy
+> fields and are deliberately rejected by `validate_clean.py`. A smoke run proves
+> mechanics only; regenerate and promote the complete dataset before training.
 
 Explanation generation is **fully separate** from detector training. One entry
 point, `generate_explanations.ps1` (Windows) / `.sh` (Unix), a thin shim over
-`experiments/explanation/pipeline.py`. It runs six stages and ends with a complete
+`experiments/explanation/pipeline.py`. It runs three stages and ends with a complete
 `ACTIVE/{devign,reveal}/{train,val}.jsonl` pair:
 
 | Stage | Script | Produces |
 |-------|--------|----------|
 | 1 generate | `explanation/generate.py` | `purpose, data_flow, risky_operations, missing_checks, evidence_tokens, safety_indicators, risk_summary, risk_level, confidence` (**confidence measured from decode-time logprobs**, not self-reported) |
-| 2 install | (pipeline) | stage-1 output → the filename later stages read |
-| 3 enrich | `expl_enrich/run_enrich.py` | `llm_v1, code_metrics, tail_facts, enrich` |
-| 4 clean/aug | `correct_val.py`, `augment_train.py` | `.clean` / `.clean.aug` variants |
-| 5 real | `apply_real_enrichment.py` | `function_name, called_functions, risky_apis, string_literals, lexical_digest, real_enrich, tail_digest` (+ refreshes `ACTIVE/`) |
-| 6 prefix | `build_prefix.py` | `prefix, prefix_recipe` (+ `ACTIVE/README.md`) |
-
-> The older `organize_explanations.ps1` is **obsolete** — its work is now stages 5
-> and 6. Do not call it.
+| 2 install | (pipeline) | stage-1 output → canonical dataset files |
+| 3 validate/promote | `explanation/validate_clean.py` | rejects legacy fields, validates types, and activates only clean Qwen rows |
 
 ```powershell
-# Windows — smoke test: 6 rows per split, end-to-end proof of the whole pipeline
+# Windows — smoke test: 6 rows per split, end-to-end mechanics only
 .\generate_explanations.ps1 -Smoke
 
 # Full default build into experiments\explanation\work\ (does NOT touch shipped data)
@@ -221,9 +219,8 @@ point, `generate_explanations.ps1` (Windows) / `.sh` (Unix), a thin shim over
 ```
 
 **Defaults** (all overridable as flags): model `qwen2.5-coder:14b`, host
-`http://localhost:9999`, `mode=auto`, `num-ctx=8192`, `timeout=600`,
-`tail-offset=220`. The launcher preflights Ollama and fails early if the model is
-missing.
+`http://localhost:9999`, `mode=auto`, `num-ctx=8192`, and `timeout=600`. The
+launcher preflights Ollama and fails early if the model is missing.
 
 **Leakage control.** The ground-truth label is **never** in the prompt; labels are
 copied onto output rows *only after* generation, purely so the rows can be used for
@@ -237,8 +234,8 @@ supervised training. This is the property RQ1 audits.
 
 ## 5. Reproduce — the L1–L3 training ladder
 
-The six per-dataset, per-rung launchers train 5 seeds each and write independent
-cache folders under `experiments/runs/final_*`. They call
+The six per-dataset, per-rung launchers train 5 seeds each and write the six
+canonical `experiments/runs/final_*_cache` folders. They call
 `experiments/expl_enrich/reproduce_real.py` with a shared config; only the
 per-dataset treatment knobs differ.
 
@@ -263,10 +260,10 @@ per-dataset treatment knobs differ.
 
 **Shared config** (all rungs, both datasets), passed to `reproduce_real.py`:
 `--code-enc codet5p` (CodeT5+, FuSEVul's encoder), `--max-text 512`, `--epochs 12`,
-`--seeds 1 2 3 4 5`, and the 8-column text channel:
+`--seeds 1 2 3 4 5`, and the eight-field clean Qwen text channel:
 
 ```
-confidence,risky_operations,missing_checks,function_name,called_functions,risky_apis,risk_summary,purpose
+confidence,purpose,data_flow,risky_operations,missing_checks,evidence_tokens,safety_indicators,risk_summary
 ```
 
 **Per-dataset specifics** (confirmed in the launchers):
@@ -276,12 +273,9 @@ confidence,risky_operations,missing_checks,function_name,called_functions,risky_
   not pass `--max-code`). Balanced classes → plain cross-entropy (focal auto-off).
   Requires `ACTIVE/devign/{train,val}.jsonl` to already exist (the Devign launchers
   do **not** rebuild it and will error if missing).
-- **Reveal** — explicitly `--max-code 512`, plus `--focal-alpha 0.85`,
-  `--focal-gamma 2.0`, tail-offset 220. **Prerequisite:** the Reveal launchers
-  first run `apply_real_enrichment.py --check --only reveal`; if `ACTIVE/reveal` is
-  absent they auto-build it with `--tail-offset 220`. (This step is implicit — it
-  runs for you — but is why a fresh checkout can train Reveal without a manual
-  enrichment step.)
+- **Reveal** — explicitly `--max-code 512`, plus `--focal-alpha 0.85` and
+  `--focal-gamma 2.0`. Its launcher validates the current clean-Qwen ACTIVE files
+  and stops before training if they are missing or contain legacy fields.
 - **L3 (both)** — enables the gate: env `SEMVUL_QUAL_V2=0` (old quality-vector gate
   off), `SEMVUL_QUAL_GATE=1`, `SEMVUL_GATE_LR_MULT=100` (gate LR ×100 so it moves),
   plus the `--qual-gate` flag. Encoders **fine-tune** here (no `SEMVUL_FROZEN`), so
@@ -296,6 +290,14 @@ confidence,risky_operations,missing_checks,function_name,called_functions,risky_
 experiments/runs/final_devign_l1_cache, final_devign_l2_cache, final_devign_l3_cache,
                  final_reveal_l1_cache, final_reveal_l2_cache, final_reveal_l3_cache
 ```
+
+Each newly initialized folder receives `.clean_qwen_contract.json`, binding it
+to hashes of the ACTIVE train/validation files and the training configuration.
+The currently checked-in folders contain unmarked historical results. The
+trainer therefore refuses to skip or overwrite them: archive their contents
+outside these six canonical folders after preserving any historical analysis,
+then start the clean rerun. This prevents old metrics from being silently
+presented as results of the new input contract.
 
 **Aggregate the ladder** (headline L1–L3 numbers, both scoring protocols side by
 side — the FuSEVul-comparable circular protocol and the non-circular
@@ -341,26 +343,25 @@ are **modules** (`python -m src.rqs.rq2 …`) and require `--dataset`.
 workflow as Appendix B applied to the distributed Devign files — 124 within-train
 label-conflicting rows (62 pairs), 12 within-val rows (6 pairs), 27 cross-split
 rows with reversed labels (~1.0% of the 2,705 unique validation functions),
-bounding un-deduplicated validation accuracy near 2678/2705 ≈ 99.0%.
+giving a conditional train-label-memorization consistency bound of
+2678/2705 ≈ 99.0%, not a universal model-accuracy ceiling.
 
 ---
 
 ## 7. Suggested order for a fresh takeover
 
-1. **Set up the env** ([§3](#3-environment-setup)) and confirm
-   `experiments/runs/final_*` and `experiments/cache/` are present (they ship in
-   the repo).
-2. **Reproduce the analyses first** ([§6](#6-reproduce--the-rq--ro-analyses-and-figures))
-   — no GPU, fastest way to confirm the caches are intact and match the paper's
-   tables/figures.
-3. `aggregate_seeds.py both` for the headline ladder numbers
-   ([§5](#5-reproduce--the-l1l3-training-ladder)).
-4. Only if you need to *rebuild* results: run the six ladder launchers
-   ([§5](#5-reproduce--the-l1l3-training-ladder)). This needs a GPU but no LLM.
-5. Only if you need to *regenerate explanations*: stand up Ollama and run
-   `generate_explanations.ps1 -Smoke` first, then scale
-   ([§4](#4-reproduce--explanation-generation-ro1--rq1)). This is the slow,
-   optional path.
+1. **Set up the environment** ([§3](#3-environment-setup)).
+2. Optionally run the analyses in [§6](#6-reproduce--the-rq--ro-analyses-and-figures)
+   to reproduce the explicitly historical checked-in results.
+3. Start Ollama and run `generate_explanations.ps1 -Smoke` to verify the clean
+   three-stage pipeline.
+4. Run the full generator with `-Promote`; confirm `validate_clean.py` accepts
+   both datasets.
+5. Preserve the historical cache contents outside the six canonical
+   `final_*_cache` folders, then run the six final launchers. The trainer creates
+   and verifies a clean-input contract in each folder.
+6. Rerun aggregation and all RQ analyses; only these regenerated results support
+   claims about the clean Qwen-only pipeline.
 
 ---
 
@@ -379,7 +380,7 @@ argparse definitions, and the on-disk caches). Confirmed:
 - All RQ entry points, argument styles (positional vs `-m … --dataset`), and
   `aggregate_seeds.py --json` match.
 - `generate_explanations.*` defaults (`qwen2.5-coder:14b`, `localhost:9999`,
-  `mode=auto`, `num-ctx=8192`, `timeout=600`) and the six pipeline stages match.
+  `mode=auto`, `num-ctx=8192`, `timeout=600`) and the three pipeline stages match.
 
 ---
 

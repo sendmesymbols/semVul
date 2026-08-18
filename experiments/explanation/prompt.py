@@ -7,8 +7,7 @@ few-shot pair.
 
   mode="anon"  VARn/FUNn normalized code (Devign benchmark form). The model must
                NOT invent meaning for an anonymized name.
-  mode="real"  real identifiers, API names and string literals (ReVeal, and the
-               de-anonymized Devign rows). The model SHOULD exploit API
+  mode="real"  real identifiers, API names and string literals (ReVeal). The model SHOULD exploit API
                knowledge -- that is signal a token encoder cannot recover.
 
 SCHEMA <-> DATA COLUMNS
@@ -29,11 +28,8 @@ generator derives it from the decode-time token logprobs of the risk_level
 verdict (see generate.py:probe_confidence). Asking the model to state a number
 would make it a generated opinion, not an internal confidence measurement.
 
-The remaining explanation.* columns are produced by later, deterministic stages
-and must not be asked of the model: llm_v1 / code_metrics / tail_facts / enrich
-(expl_enrich/static_enrich.py), function_name / called_functions / risky_apis /
-string_literals / lexical_digest / real_enrich / tail_digest
-(expl_enrich/apply_real_enrichment.py), prefix / prefix_recipe (ladder builder).
+Legacy post-processing fields are outside the generator contract and are
+rejected by validate_clean.py before final training.
 
 The generator NEVER sees the ground-truth label.
 """

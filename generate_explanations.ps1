@@ -1,19 +1,12 @@
 # GENERATE EXPLANATIONS - THE single entry point for the explanation dataset.
 #
-# Runs all six stages and ends with a complete ACTIVE/ pair per dataset, carrying
-# every explanation.* column the training wrappers read:
+# Runs three stages and ends with a clean ACTIVE/ pair per dataset:
 #
 #   1 generate    purpose, data_flow, risky_operations, missing_checks,
 #                 evidence_tokens, safety_indicators, risk_summary, risk_level,
 #                 confidence  (MEASURED from decode-time logprobs, not self-reported)
-#   2 install     stage-1 output -> the filename later stages read
-#   3 enrich      llm_v1, code_metrics, tail_facts, enrich
-#   4 clean/aug   the .clean / .clean.aug variants ACTIVE is built from
-#   5 real        function_name, called_functions, risky_apis, string_literals,
-#                 lexical_digest, real_enrich, tail_digest
-#   6 prefix      prefix, prefix_recipe  + ACTIVE/README.md
-#
-# organize_explanations.ps1 is NOT needed any more -- it was stages 5/6 by hand.
+#   2 install     stage-1 output -> canonical dataset files
+#   3 activate    validate Qwen-only fields and copy to ACTIVE/
 #
 # By default it builds into experiments\explanation\work\ and does NOT touch the
 # shipped explanations\SemanticVul\. Pass -Promote to build in the shipped tree.
@@ -40,10 +33,8 @@ param(
     [int]$Timeout = 600,
     [string]$Tag = "",
     [string]$WorkDir = "",
-    [ValidateRange(1, 6)][int]$FromStage = 1,
-    [ValidateRange(1, 6)][int]$ToStage = 6,
-    [int]$AugCopies = 1,
-    [int]$TailOffset = 220,
+    [ValidateRange(1, 3)][int]$FromStage = 1,
+    [ValidateRange(1, 3)][int]$ToStage = 3,
     [switch]$NoThink,
     [switch]$Smoke,
     [switch]$Promote
@@ -67,8 +58,7 @@ if ($FromStage -le 1) {
 $a = @("--dataset", $Dataset, "--split", $Split, "--model", $Model,
        "--host", $OllamaHost, "--mode", $Mode, "--workers", $Workers,
        "--num-ctx", $NumCtx, "--timeout", $Timeout,
-       "--from-stage", $FromStage, "--to-stage", $ToStage,
-       "--aug-copies", $AugCopies, "--tail-offset", $TailOffset)
+       "--from-stage", $FromStage, "--to-stage", $ToStage)
 if ($Stratified -gt 0) { $a += @("--stratified", $Stratified) }
 if ($Tag)              { $a += @("--tag", $Tag) }
 if ($WorkDir)          { $a += @("--work-dir", $WorkDir) }

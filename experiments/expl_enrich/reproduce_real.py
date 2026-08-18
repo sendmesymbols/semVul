@@ -1,24 +1,13 @@
-"""Overnight driver for the REAL-enrichment treatment arm (both datasets).
+"""Train the L1--L3 ladder from validated Qwen-only ACTIVE inputs.
 
-Configs (gates in explanations/SemanticVul/devign_real/ENRICHMENT_RESULTS.md):
-  devign  L1/L2/L3  512-token window, train = enriched.clean.real (NO aug),
-          val = enriched.real (full benchmark val, 2732 rows, 67% treated),
-          text channel = deanon'd fields + evidence_tokens + lexical_digest
-          (TF-IDF gate: +7.45 ROC over anon code)     -> runs/enriched512_real/
-  reveal  L1/L2/L3  320-token window (matches runs/enriched arm), train =
-          enriched.clean.real, val = enriched.real (2273 rows),
-          text channel = CORE fields (no prose, no llm_v1) + lexical_digest
-          (TF-IDF gate: +1.39 ROC, CI [+0.31,+2.63])  -> runs/enriched_real/
-
-Output dirs match the runs/enriched* glob so ensemble.py / dual_eval.py
-auto-scan the new members alongside every earlier arm (val row-aligned:
-*.real val files are order-identical to the untreated ones).
-
-Resumable: any (dataset, rung, seed) with a final JSON is skipped.
-Invoked by reproduce_reveal.ps1 / reproduce_devign.ps1.
+Final launchers validate ACTIVE before invoking this driver. Static enrichment,
+recovered identifiers, lexical digests, and alternate dataset variants are not
+selected here. Runs are resumable within their explicitly named cache family.
 """
 from __future__ import annotations
 import argparse
+import hashlib
+import json
 import os
 import sys
 
@@ -32,66 +21,89 @@ for _p in (ROOT, LADDER):
 RUNS = os.path.join(ROOT, "experiments", "runs")
 SPLIT_SEED = 1337  # shared tune carve -> tune probs averageable across seeds
 
-# --fields prefix (default since 2026-07-15): the text channel is the single
-# materialized `explanation.prefix` string carried by the round-3 ACTIVE files
-# (built in D:\SementicVul, proxy-gate F1 reveal 0.5055 / devign 0.6324).
-# Recipes were selected by a 14-way per-column ablation:
-#   reveal: lexical_digest | log2-binned metrics | calls | risky-first
-#           evidence | string_literals | tail  (denoised train baked in)
-#   devign: digest | missing | calls | identifier subword morphemes |
-#           REAL-code head (devign_real join) | real string literals
-#           -- risky_apis measured NEGATIVE and is excluded; purpose/data_flow/
-#           evidence_tokens measured negative on devign columns as well.
-# Any other channel: pass an explicit comma list via --fields (verbatim to
-# SEMVUL_EXPL_FIELDS, same list for both datasets); the final_*.ps1 launchers
-# hardcode their 8-column $Cols this way.
-
-os.environ["SEMVUL_EXPL_VARIANT"] = "enriched"
-os.environ["SEMVUL_VAL_VARIANT"] = "enriched.real"
-# Default to the 44-dim v2 quality block for the fine-tuned ladder, but let a
-# caller opt out (SEMVUL_QUAL_V2=0) -- the RQ2 gate scripts do this to feed the
-# gate ONLY the clean v1 label-free features (v2 adds risk_level/confidence
-# ordinals = the LLM's own leaky vuln score, unwanted for a label-free gate).
-os.environ.setdefault("SEMVUL_QUAL_V2", "1")
-# ACTIVE/ is the canonical run input (single source of truth). When present it is
-# read directly; when absent the loaders fall back to the long-named .real files.
-# apply_real_enrichment keeps ACTIVE in sync, so copying only ACTIVE/ is enough.
+# ACTIVE/ is the canonical, validated run input. The final launchers pass an
+# explicit Qwen-only field list through SEMVUL_EXPL_FIELDS.
+os.environ.setdefault("SEMVUL_QUAL_V2", "0")
 os.environ["SEMVUL_ACTIVE_DIR"] = "1"
 
+CACHE_CONTRACT = ".clean_qwen_contract.json"
 
-def _check_prefix_present():
-    """Fail fast if ACTIVE files lack the materialized explanation.prefix
-    (e.g. ACTIVE was rebuilt by apply_real_enrichment from pre-round-3
-    sources). Guards against a silently EMPTY text channel."""
-    import json
-    from src.config import EXPL_DIR
-    for ds in ("reveal", "devign"):
-        for split in ("train", "val"):
-            p = EXPL_DIR / "ACTIVE" / ds / f"{split}.jsonl"
-            if not p.exists():
-                continue
-            with p.open(encoding="utf-8") as fh:
-                row = json.loads(fh.readline())
-            if not (row.get("explanation") or {}).get("prefix"):
-                sys.exit(f"[fields=prefix] {p} has no explanation.prefix - "
-                         f"restore the *_final_*_3 files into ACTIVE/ (they were "
-                         f"overwritten?), or pass an explicit --fields column list")
+
+def _sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _cache_contract(dataset, rungs, fields, kwargs):
+    active = os.path.join(ROOT, "explanations", "SemanticVul", "ACTIVE", dataset)
+    inputs = {}
+    for split in ("train", "val"):
+        path = os.path.join(active, f"{split}.jsonl")
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"missing canonical ACTIVE input: {path}")
+        inputs[split] = _sha256(path)
+    return {
+        "contract": "clean-qwen-active-v1",
+        "dataset": dataset,
+        "rungs": sorted(rungs),
+        "fields": fields,
+        "active_sha256": inputs,
+        "training": kwargs,
+        "gate": {
+            "quality_gate": os.environ.get("SEMVUL_QUAL_GATE", "0"),
+            "quality_v2": os.environ.get("SEMVUL_QUAL_V2", "0"),
+            "gate_lr_multiplier": os.environ.get("SEMVUL_GATE_LR_MULT", ""),
+            "hard_conf_switch": os.environ.get("SEMVUL_HARD_CONF_SWITCH", "0"),
+            "hard_conf_threshold": os.environ.get("SEMVUL_HARD_CONF_THRESH", ""),
+        },
+    }
+
+
+def _prepare_cache(dataset, rungs, subdir, fields, kwargs):
+    """Bind a cache directory to one clean input/configuration contract.
+
+    Existing unmarked result directories predate the clean-Qwen contract. They
+    are rejected instead of being skipped or overwritten; archive them outside
+    the canonical directory before starting the clean rerun.
+    """
+    out_root = os.path.join(RUNS, subdir)
+    marker = os.path.join(out_root, CACHE_CONTRACT)
+    expected = _cache_contract(dataset, rungs, fields, kwargs)
+    completed = []
+    if os.path.isdir(out_root):
+        for base, _dirs, files in os.walk(out_root):
+            completed.extend(os.path.join(base, name) for name in files
+                             if name.endswith(".json") and "_partial" not in name
+                             and name != CACHE_CONTRACT)
+    if os.path.isfile(marker):
+        with open(marker, encoding="utf-8") as handle:
+            actual = json.load(handle)
+        if actual != expected:
+            raise RuntimeError(
+                f"cache contract mismatch in {out_root}; archive the directory "
+                "before running this configuration"
+            )
+        return
+    if completed:
+        raise RuntimeError(
+            f"legacy/unverified results exist in {out_root}; archive its current "
+            "contents before creating clean-Qwen results in this canonical cache"
+        )
+    os.makedirs(out_root, exist_ok=True)
+    temporary = marker + ".tmp"
+    with open(temporary, "w", encoding="utf-8") as handle:
+        json.dump(expected, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    os.replace(temporary, marker)
 
 
 def _build_jobs(args):
-    """Construct the (ds, rungs, sub, suffix, fields, kw) job tuples. ReVeal-only
-    knobs (tail_digest, focal alpha/gamma) are attached to the ReVeal job ONLY;
-    the Devign job is never given them."""
+    """Construct the (dataset, rungs, cache, suffix, fields, kwargs) jobs."""
     ga = max(1, 32 // args.batch512)
-    if args.fields == "prefix":
-        _check_prefix_present()
-        reveal_fields = devign_fields = "prefix"
-    else:  # literal comma-separated column list -> SEMVUL_EXPL_FIELDS verbatim
-        # (e.g. "risk_level,confidence,called_functions"); serialized by
-        # src/data_io.py:_render_expl_field. Same list for both datasets.
-        reveal_fields = devign_fields = args.fields
-        if args.tail_digest:  # ReVeal-only opt-in: append tail_digest to its channel
-            reveal_fields = reveal_fields + ",tail_digest"
+    reveal_fields = devign_fields = args.fields
     reveal_kw = {}
     if args.focal_alpha is not None:
         reveal_kw["focal_alpha"] = args.focal_alpha
@@ -123,9 +135,9 @@ def _build_jobs(args):
         devign_kw["subset"] = args.subset
     jobs = [
         ("reveal", args.rungs or ["L2", "L3", "L1"],
-         "enriched_real" + args.out_tag, "clean.real", reveal_fields, reveal_kw),
+         "clean_qwen_reveal" + args.out_tag, "", reveal_fields, reveal_kw),
         ("devign", args.rungs or ["L1", "L2", "L3"],
-         "enriched512_real" + args.out_tag, "clean.real", devign_fields,
+         "clean_qwen_devign" + args.out_tag, "", devign_fields,
          devign_kw),
     ]
     if args.only:
@@ -146,8 +158,6 @@ def main():
     ap.add_argument("--batch512", type=int, default=2,
                     help="batch for 512-token devign (2 fits 8GB; 4 on >=16GB)")
     ap.add_argument("--rungs", nargs="*", default=None)
-    ap.add_argument("--tail-digest", action="store_true",
-                    help="ReVeal only: append tail_digest to the text channel")
     ap.add_argument("--focal-alpha", type=float, default=None,
                     help="ReVeal only: focal positive weight (default auto ~0.80)")
     ap.add_argument("--focal-gamma", type=float, default=2.0,
@@ -166,12 +176,8 @@ def main():
                          "so the wider window fits VRAM).")
     ap.add_argument("--epochs", type=int, default=None,
                     help="training epochs per rung (default: train_rung's 12)")
-    ap.add_argument("--fields", default="prefix",
-                    help="text channel: 'prefix' = materialized round-3 "
-                         "explanation.prefix (default); or a literal "
-                         "comma-separated explanation.* column list "
-                         "(e.g. 'risk_level,confidence,called_functions') "
-                         "passed verbatim to SEMVUL_EXPL_FIELDS")
+    ap.add_argument("--fields", required=True,
+                    help="comma-separated generator-produced explanation fields")
     ap.add_argument("--evidence-window", action="store_true",
                     help="L2/L3 code channel: center the code span on the "
                          "explanation's verbatim evidence instead of the head "
@@ -196,10 +202,18 @@ def main():
     from train import train_rung  # after sys.path setup
     # reveal first when both requested: shorter, and it fails fast.
     jobs = _build_jobs(args)
+    os.environ["SEMVUL_QUAL_GATE"] = "1" if args.qual_gate else "0"
+    if not any("L3" in rungs for _ds, rungs, _sub, _suffix, _fields, _kw in jobs):
+        os.environ.pop("SEMVUL_HARD_CONF_SWITCH", None)
+        os.environ.pop("SEMVUL_HARD_CONF_THRESH", None)
+        os.environ.pop("SEMVUL_GATE_LR_MULT", None)
+
+    for ds, rungs, sub, _suffix, fields, kw in jobs:
+        _prepare_cache(ds, rungs, sub, fields, kw)
 
     for seed in args.seeds:
         for ds, rungs, sub, suffix, fields, kw in jobs:
-            os.environ["SEMVUL_TRAIN_SUFFIX"] = suffix
+            os.environ.pop("SEMVUL_TRAIN_SUFFIX", None)
             os.environ["SEMVUL_EXPL_FIELDS"] = fields
             os.environ["SEMVUL_QUAL_GATE"] = "1" if args.qual_gate else "0"
             out_dir = os.path.join(RUNS, sub, f"s{seed}")

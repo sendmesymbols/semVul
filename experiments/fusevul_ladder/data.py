@@ -6,12 +6,8 @@ duplicate functions and any train function that also appears in val); the val
 set is left identical to the benchmark so "beats stated results" is a direct
 same-split comparison.
 
-Env knobs (all default off -> behavior identical to before):
-  SEMVUL_EXPL_VARIANT=enriched   load *.enriched.jsonl (see src/data_io.py)
-  SEMVUL_TRAIN_SUFFIX=clean.aug  load <ds>_train[.<variant>].clean.aug.jsonl
-                                 for TRAIN only (val untouched); produced by
-                                 experiments/expl_enrich/augment_train.py
-  SEMVUL_QUAL_V2=1               44-dim quality block (v1 22 + static-v1 22)
+Env knobs used by final runs:
+  SEMVUL_ACTIVE_DIR=1            load validated Qwen-only ACTIVE JSONL files
   SEMVUL_CONF_SWITCH=1          expose raw explanation.confidence as a separate
                                  scalar prior for L3 so low-confidence rows can
                                  close the explanation gate and lean on code
@@ -135,8 +131,7 @@ def _load_train(dataset: str):
             else:
                 raise FileNotFoundError(
                     f"{path} missing (and no ACTIVE fallback at {ap}) - run "
-                    f"experiments/expl_enrich/apply_real_enrichment.py, or copy "
-                    f"explanations/SemanticVul/ACTIVE/ onto this machine")
+                    f"and promote clean explanations with generate_explanations.*")
     import json
     from src.data_io import Sample
     out = []
