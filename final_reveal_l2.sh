@@ -10,6 +10,7 @@
 # Resumable within the clean-Qwen cache family.
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
+. "scripts/cache_complete.sh"
 
 BATCH512=2  # 2 fits 8GB at 512-tok code
 EW=()       # --evidence-window (opt-in A/B): evidence-centered code span for L2/L3
@@ -20,6 +21,21 @@ while [[ $# -gt 0 ]]; do
         *) echo "Unknown argument: $1 (supported: --batch512 N, --evidence-window)" >&2; exit 1 ;;
     esac
 done
+
+# Five fixed seeds for a paired ladder comparison.
+SEEDS=(1 2 3 4 5)
+# Qwen-only structured text channel; risk_level is deliberately excluded.
+COLS="confidence,purpose,data_flow,risky_operations,missing_checks,evidence_tokens,safety_indicators,risk_summary"
+
+# ---- ReVeal treatment knobs (HARDCODED; no env vars) ----
+FOCAL_ALPHA=0.85
+FOCAL_GAMMA=2.0
+# ---------------------------------------------------------
+
+if cache_complete reveal L2 final_reveal_l2_cache "${SEEDS[@]}"; then
+    echo "[cache] final_reveal_l2_cache is complete; skipping validation and training."
+    exit 0
+fi
 
 # Prefer the already-activated venv; fall back to .venv/ or venv/ in the repo.
 if [[ -n "${VIRTUAL_ENV:-}" && -x "$VIRTUAL_ENV/bin/python" ]]; then
@@ -33,19 +49,9 @@ else
     exit 1
 fi
 
-# Five fixed seeds for a paired ladder comparison.
-SEEDS=(1 2 3 4 5)
-# Qwen-only structured text channel; risk_level is deliberately excluded.
-COLS="confidence,purpose,data_flow,risky_operations,missing_checks,evidence_tokens,safety_indicators,risk_summary"
-
-# ---- ReVeal treatment knobs (HARDCODED; no env vars) ----
-FOCAL_ALPHA=0.85
-FOCAL_GAMMA=2.0
-# ---------------------------------------------------------
-
-# Reject missing or legacy enriched ACTIVE inputs before training.
-"$PY" experiments/explanation/validate_clean.py --dataset reveal \
-    || { echo "ERROR: ACTIVE/reveal is missing or contains legacy enriched inputs" >&2; exit 1; }
+# Use the original cache family; the driver skips completed seed results and
+# trains only missing seeds.
+export SEMVUL_LEGACY_CACHE=1
 
 # --fields $COLS: generator-produced structured fields only.
 # --cache-name final_reveal_l2_cache: canonical cache; the driver verifies provenance.

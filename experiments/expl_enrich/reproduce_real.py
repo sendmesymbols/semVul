@@ -1,8 +1,11 @@
-"""Train the L1--L3 ladder from validated Qwen-only ACTIVE inputs.
+"""Train the L1--L3 ladder from ACTIVE inputs.
 
 Final launchers validate ACTIVE before invoking this driver. Static enrichment,
 recovered identifiers, lexical digests, and alternate dataset variants are not
 selected here. Runs are resumable within their explicitly named cache family.
+When SEMVUL_LEGACY_CACHE=1, existing cache folders are reused without
+creating or checking a clean-Qwen contract; this is the compatibility path for
+the original enriched-cache results.
 """
 from __future__ import annotations
 import argparse
@@ -70,6 +73,9 @@ def _prepare_cache(dataset, rungs, subdir, fields, kwargs):
     the canonical directory before starting the clean rerun.
     """
     out_root = os.path.join(RUNS, subdir)
+    if os.environ.get("SEMVUL_LEGACY_CACHE") == "1":
+        os.makedirs(out_root, exist_ok=True)
+        return
     marker = os.path.join(out_root, CACHE_CONTRACT)
     expected = _cache_contract(dataset, rungs, fields, kwargs)
     completed = []

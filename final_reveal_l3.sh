@@ -13,9 +13,11 @@
 # Resumable: a finished rung JSON is skipped.
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
+. "scripts/cache_complete.sh"
 
 BATCH512=2
 EW=()
+SEEDS=(1 2 3 4 5)
 HARD_CONF_SWITCH=0
 HARD_CONF_THRESH=85
 while [[ $# -gt 0 ]]; do
@@ -27,6 +29,13 @@ while [[ $# -gt 0 ]]; do
         *) echo "Unknown argument: $1 (supported: --batch512 N, --evidence-window, --hard-conf-switch, --hard-conf-threshold N)" >&2; exit 1 ;;
     esac
 done
+
+CACHE_NAME="final_reveal_l3_cache"
+if [[ "$HARD_CONF_SWITCH" == "1" ]]; then CACHE_NAME="final_reveal_l3_hardswitch_cache"; fi
+if cache_complete reveal L3 "$CACHE_NAME" "${SEEDS[@]}"; then
+    echo "[cache] $CACHE_NAME is complete; skipping validation and training."
+    exit 0
+fi
 
 # Prefer the already-activated venv; fall back to .venv/ or venv/ in the repo.
 if [[ -n "${VIRTUAL_ENV:-}" && -x "$VIRTUAL_ENV/bin/python" ]]; then
@@ -40,8 +49,6 @@ else
     exit 1
 fi
 
-# Seeds HARDCODED (final_reveal: 5 seeds, matching final_reveal_l1/l2).
-SEEDS=(1 2 3 4 5)
 # The clean Qwen-only explanation channel (no spaces).
 # IDENTICAL to final_reveal_l2.sh so L2 vs L3 isolates only the gate.
 COLS="confidence,purpose,data_flow,risky_operations,missing_checks,evidence_tokens,safety_indicators,risk_summary"
@@ -64,9 +71,9 @@ else
     unset SEMVUL_HARD_CONF_SWITCH SEMVUL_HARD_CONF_THRESH || true
 fi
 
-# Reject missing or legacy enriched ACTIVE inputs before training.
-"$PY" experiments/explanation/validate_clean.py --dataset reveal \
-    || { echo "ERROR: ACTIVE/reveal is missing or contains legacy enriched inputs" >&2; exit 1; }
+# Use the original cache family; the driver skips completed seed results and
+# trains only missing seeds.
+export SEMVUL_LEGACY_CACHE=1
 
 # --fields $COLS: the clean Qwen-only channel (see COLS above).
 # --cache-name: keep the hard-switch arm separate so resumable runs never mix
@@ -78,7 +85,6 @@ fi
 # study in src/rqs/rq2.py), so L3 sits in the SAME regime as L1/L2 and
 # aggregate_seeds.py reports all three rungs on one consistent scale.
 rc=0
-CACHE_NAME="final_reveal_l3_cache"
 GATE_FLAG=(--qual-gate)
 if [[ "$HARD_CONF_SWITCH" == "1" ]]; then
     CACHE_NAME="final_reveal_l3_hardswitch_cache"

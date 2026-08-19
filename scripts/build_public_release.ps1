@@ -30,6 +30,17 @@ if (Test-Path -LiteralPath $destinationPath) {
 }
 New-Item -ItemType Directory -Path $destinationPath | Out-Null
 
+function Get-ReleaseRelativePath {
+    param([Parameter(Mandatory)][string]$Path)
+    $base = $destinationPath.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) +
+        [IO.Path]::DirectorySeparatorChar
+    $full = [IO.Path]::GetFullPath($Path)
+    if (-not $full.StartsWith($base, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Path is outside the release directory: $full"
+    }
+    return $full.Substring($base.Length).Replace('\', '/')
+}
+
 function Copy-ReleaseFile {
     param([Parameter(Mandatory)][string]$RelativePath)
     $source = Join-Path $repo $RelativePath
@@ -53,13 +64,28 @@ function Copy-ReleaseTree {
     Copy-Item -LiteralPath $source -Destination $target -Recurse
 }
 
+function Write-ReleaseText {
+    param(
+        [Parameter(Mandatory)][string]$RelativePath,
+        [Parameter(Mandatory)][string]$Text
+    )
+    $target = Join-Path $destinationPath $RelativePath
+    New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+    [IO.File]::WriteAllText($target, $Text, [Text.UTF8Encoding]::new($false))
+}
+
 $files = @(
     ".gitattributes",
     ".gitignore",
     "requirements.txt",
     "PUBLIC_RELEASE.md",
+    "run_final_sequence.ps1",
+    "run_final_sequence.sh",
     "generate_explanations.ps1",
     "generate_explanations.sh",
+    "organize_explanations.ps1",
+    "scripts/cache_complete.ps1",
+    "scripts/cache_complete.sh",
     "final_devign_l1.ps1", "final_devign_l1.sh",
     "final_devign_l2.ps1", "final_devign_l2.sh",
     "final_devign_l3.ps1", "final_devign_l3.sh",
@@ -121,22 +147,52 @@ if ($Profile -eq "Reviewer") {
         Copy-ReleaseTree "reports/plots"
     }
 } else {
-    foreach ($placeholder in @(
-        "data/.gitkeep",
-        "explanations/SemanticVul/ACTIVE/.gitkeep",
-        "experiments/runs/.gitkeep",
-        "reports/plots/.gitkeep"
-    )) {
-        $target = Join-Path $destinationPath $placeholder
-        New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
-        New-Item -ItemType File -Path $target | Out-Null
+    Write-ReleaseText "data/README.md" @"
+# Data
+
+The minimal code profile intentionally excludes dataset CSV files. Use the
+Reviewer profile only when the venue and upstream dataset licenses permit
+redistribution.
+"@
+    Write-ReleaseText "explanations/SemanticVul/ACTIVE/README.md" @"
+# ACTIVE Explanations
+
+The minimal code profile intentionally excludes generated explanation JSONL
+files. Regenerate them with the documented generation pipeline, or use the
+Reviewer profile only when redistribution is permitted.
+"@
+    Write-ReleaseText "experiments/runs/README.md" @"
+# Runs
+
+The minimal code profile intentionally excludes generated result caches. Rerun
+the documented launchers to create fresh caches, or use the Reviewer profile only
+when redistribution is permitted.
+"@
+    Write-ReleaseText "reports/plots/README.md" @"
+# Plots
+
+The minimal code profile intentionally excludes generated figures. Regenerate
+them from result caches with `python src/rqs/plots.py both --cache-prefix final`.
+"@
+}
+
+if (-not $KeepIdentities) {
+    $identityPattern = '(?i)(Ihtesham Ul Islam|Rabia Khan|Muhammad Sohail|Nazia Bibi|Military College of Signals|NUST)'
+    $identityHits = Get-ChildItem -LiteralPath $destinationPath -Recurse -File |
+        Where-Object { $_.Extension -in @(".md", ".txt", ".py", ".ps1", ".sh", ".json", ".jsonl", ".csv") } |
+        Select-String -Pattern $identityPattern
+    if ($identityHits) {
+        $paths = $identityHits |
+            ForEach-Object { Get-ReleaseRelativePath $_.Path } |
+            Sort-Object -Unique
+        throw "Anonymous release contains identifying text in: $($paths -join ', ')"
     }
 }
 
 $manifest = Get-ChildItem -LiteralPath $destinationPath -Recurse -File |
     ForEach-Object {
         [pscustomobject]@{
-            Path = [IO.Path]::GetRelativePath($destinationPath, $_.FullName).Replace('\', '/')
+            Path = Get-ReleaseRelativePath $_.FullName
             Bytes = $_.Length
             SHA256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
         }

@@ -237,6 +237,19 @@ canonical `experiments/runs/final_*_cache` folders. They call
 `experiments/expl_enrich/reproduce_real.py` with a shared config; only the
 per-dataset treatment knobs differ.
 
+For the shipped/original results, use the single entry point below. It maps each
+dataset/rung to its matching `experiments/runs/final_<dataset>_<rung>_cache`
+folder; completed seed JSONs are skipped and only missing seeds are trained:
+
+```powershell
+.\run_final_sequence.ps1              # reuse/generate missing original caches
+.\run_final_sequence.ps1 -Dataset reveal -Rungs L1,L2,L3
+```
+
+The original per-rung commands below remain the canonical commands and are the
+scripts invoked by this wrapper. Clean-Qwen generation is separate and opt-in:
+`.\run_final_sequence.ps1 -GenerateCleanQwen`.
+
 ```powershell
 # Activate the venv
 .\.venv\Scripts\Activate.ps1
@@ -269,11 +282,10 @@ confidence,purpose,data_flow,risky_operations,missing_checks,evidence_tokens,saf
 - **Devign** — code window **512** (the reproducer's built-in Devign default,
   `reproduce_real.py:103` `devign_kw = dict(max_code=512, ...)`; the launchers do
   not pass `--max-code`). Balanced classes → plain cross-entropy (focal auto-off).
-  Requires `ACTIVE/devign/{train,val}.jsonl` to already exist (the Devign launchers
-  do **not** rebuild it and will error if missing).
+  Reuses `final_devign_l{1,2,3}_cache`; completed seed JSONs are skipped and
+  missing seeds are trained into the same cache folders.
 - **Reveal** — explicitly `--max-code 512`, plus `--focal-alpha 0.85` and
-  `--focal-gamma 2.0`. Its launcher validates the current clean-Qwen ACTIVE files
-  and stops before training if they are missing or contain legacy fields.
+  `--focal-gamma 2.0`. Reuses `final_reveal_l{1,2,3}_cache` in the same way.
 - **L3 (both)** — enables the gate: env `SEMVUL_QUAL_V2=0` (old quality-vector gate
   off), `SEMVUL_QUAL_GATE=1`, `SEMVUL_GATE_LR_MULT=100` (gate LR ×100 so it moves),
   plus the `--qual-gate` flag. Encoders **fine-tune** here (no `SEMVUL_FROZEN`), so

@@ -11,12 +11,17 @@
 #   .\final_reveal_l1.ps1 -Batch512 4     # >=16GB GPU
 # Resumable: a finished rung JSON is skipped -- to RETRAIN at 512, first clear/
 # Clean-Qwen results use a separate cache, so legacy runs cannot be reused.
-param([int]$Batch512 = 2, [switch]$EvidenceWindow)  # 2 fits 8GB at 512-tok code
+param([int]$Batch512 = 2, [switch]$EvidenceWindow, [switch]$CleanQwen)  # 2 fits 8GB at 512-tok code
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
+. (Join-Path $PSScriptRoot "scripts\cache_complete.ps1")
 $py = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 # Seeds HARDCODED (final_reveal: 5 seeds, matching final_reveal_l2/l3).
 $Seeds = @(1, 2, 3, 4, 5)
+if (Test-CacheComplete -Dataset reveal -Rung L1 -CacheName final_reveal_l1_cache -Seeds $Seeds) {
+    Write-Host "[cache] final_reveal_l1_cache is complete; skipping validation and training."
+    exit 0
+}
 # The clean Qwen-only explanation channel (unused by L1, retained for parity).
 # L1 ignores the text channel; kept identical to L2/L3 for a uniform launcher.
 $Cols = "confidence,purpose,data_flow,risky_operations,missing_checks,evidence_tokens,safety_indicators,risk_summary"
@@ -26,9 +31,13 @@ $FocalAlpha = 0.85
 $FocalGamma = 2.0
 # ---------------------------------------------------------
 
-# Reject missing or legacy enriched ACTIVE inputs before training.
-& $py experiments\explanation\validate_clean.py --dataset reveal
-if ($LASTEXITCODE -ne 0) { throw "ACTIVE/reveal is missing or contains legacy enriched inputs" }
+if ($CleanQwen) {
+    Remove-Item Env:SEMVUL_LEGACY_CACHE -ErrorAction SilentlyContinue
+    & $py experiments\explanation\validate_clean.py --dataset reveal
+    if ($LASTEXITCODE -ne 0) { throw "ACTIVE/reveal is missing or contains legacy enriched inputs" }
+} else {
+    $env:SEMVUL_LEGACY_CACHE = "1"
+}
 
 $seedArgs = $Seeds | ForEach-Object { "$_" }
 # --code-enc codet5p: CodeT5+ code channel (FuSEVul's encoder).

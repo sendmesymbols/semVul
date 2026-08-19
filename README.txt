@@ -68,7 +68,7 @@ THE LADDER (spine of the whole project)
       rqs/                       ALL analysis entry points (read-only over caches).
   experiments/
       explanation/               THE explanation generator (pipeline.py + generate.py
-                                 + prompt.py); builds ACTIVE/ in 6 stages.
+                                 + prompt.py); builds clean ACTIVE/ in 3 stages.
       expl_enrich/               Post-processing + reproduce_real.py (the trainer
                                  the final_*.ps1 launchers call).
       cache/                     Frozen encoder embeddings for RQ2/RQ4 (.npz/.npy);
@@ -124,11 +124,12 @@ Steps:
  4. REPRODUCE -- EXPLANATION GENERATION  (RO1 / RQ1)   [SLOW, OPTIONAL]
 -------------------------------------------------------------------------------
 
-One entry point over a 6-stage pipeline (generate -> install -> enrich ->
-clean/aug -> real -> prefix), ending with a complete ACTIVE/ pair per dataset.
-confidence is MEASURED from decode-time token logprobs, not self-reported. The
-ground-truth label is NEVER in the prompt (copied to rows only after generation).
-The old organize_explanations.ps1 is OBSOLETE (now stages 5-6); do not call it.
+One entry point over a 3-stage pipeline (generate -> install -> validate/promote),
+ending with a complete clean Qwen-only ACTIVE/ pair per dataset. confidence is
+MEASURED from decode-time token logprobs, not self-reported. The ground-truth
+label is NEVER in the prompt (copied to rows only after generation). The
+organize_explanations.ps1 file remains as a deprecated compatibility shim for
+older documentation and forwards to the stage-2/3 promotion step.
 
   Windows:
      .\generate_explanations.ps1 -Smoke                 # 6 rows/split, end-to-end proof
@@ -142,13 +143,12 @@ The old organize_explanations.ps1 is OBSOLETE (now stages 5-6); do not call it.
      ./generate_explanations.sh --promote
 
   Defaults: model qwen2.5-coder:14b, host http://localhost:9999, mode auto,
-  num-ctx 8192, timeout 600, tail-offset 220.
+  num-ctx 8192, timeout 600.
 
   WARNING: full generation is ~70 s/sample; all four splits (~70,802 rows) is
   ~57 days sequential (~7 days at -Workers 8). Resumable (finished rows skipped).
-  The shipped ACTIVE/ files ALREADY contain the final set -- you do NOT need to
-  regenerate to reproduce training or the RQs. Use -Smoke only to prove the
-  pipeline works.
+  The shipped final_*_cache folders are the original result source. You do NOT
+  need to regenerate explanations to reproduce the existing training results.
 
 -------------------------------------------------------------------------------
  5. REPRODUCE -- TRAINING LADDER + ANALYSES
@@ -162,14 +162,14 @@ TRAIN THE SIX FINAL CACHES  (GPU; no LLM needed):
   #  a finished rung JSON is skipped.)
 
   Shared config (all rungs, both datasets): --code-enc codet5p, --max-text 512,
-  --epochs 12, seeds 1 2 3 4 5, and the 8-column text channel:
-     confidence,risky_operations,missing_checks,function_name,
-     called_functions,risky_apis,risk_summary,purpose
+  --epochs 12, seeds 1 2 3 4 5, and the clean Qwen text channel:
+     confidence,purpose,data_flow,risky_operations,missing_checks,
+     evidence_tokens,safety_indicators,risk_summary
 
   Devign : code window 512 (reproducer default); balanced -> plain cross-entropy.
-           Requires ACTIVE/devign to already exist (does NOT rebuild it).
-  Reveal : --max-code 512, --focal-alpha 0.85, --focal-gamma 2.0, tail-offset 220.
-           Requires validated Qwen-only ACTIVE/reveal inputs; it never auto-builds them.
+  Reveal : --max-code 512, --focal-alpha 0.85, --focal-gamma 2.0.
+  Both   : matching final_*_cache folders are reused; completed seed JSONs are
+           skipped and missing seeds are trained into those same folders.
   L3     : SEMVUL_QUAL_V2=0, SEMVUL_QUAL_GATE=1, SEMVUL_GATE_LR_MULT=100,
            --qual-gate. Encoders fine-tune (same regime as L1/L2).
 

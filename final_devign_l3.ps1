@@ -16,6 +16,7 @@
 param(
     [int]$Batch512 = 2,
     [int[]]$Seeds = @(1, 2, 3, 4, 5),
+    [switch]$CleanQwen,
     # Hard confidence switch (alternative to gate): per-sample if/else on
     # confidence field. Confidence >= threshold -> code ALONE; below ->
     # explanation ALONE. Validated direction: HIGH conf -> code (on reveal;
@@ -25,6 +26,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
+. (Join-Path $PSScriptRoot "scripts\cache_complete.ps1")
 $py = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 # The clean Qwen-only explanation channel (no spaces).
 # IDENTICAL to final_devign_l2.ps1 so L2 vs L3 isolates only the gate.
@@ -45,12 +47,21 @@ if ($HardConfSwitch) {
     Remove-Item Env:SEMVUL_HARD_CONF_THRESH -ErrorAction SilentlyContinue
 }
 
-# Reject missing or legacy enriched ACTIVE inputs before training.
-& $py experiments\explanation\validate_clean.py --dataset devign
-if ($LASTEXITCODE -ne 0) { throw "ACTIVE/devign is missing or contains legacy enriched inputs" }
+if ($CleanQwen) {
+    Remove-Item Env:SEMVUL_LEGACY_CACHE -ErrorAction SilentlyContinue
+    & $py experiments\explanation\validate_clean.py --dataset devign
+    if ($LASTEXITCODE -ne 0) { throw "ACTIVE/devign is missing or contains legacy enriched inputs" }
+} else {
+    $env:SEMVUL_LEGACY_CACHE = "1"
+}
+
+$CacheName = if ($HardConfSwitch) { "final_devign_l3_hardswitch_cache" } else { "final_devign_l3_cache" }
+if (Test-CacheComplete -Dataset devign -Rung L3 -CacheName $CacheName -Seeds $Seeds) {
+    Write-Host "[cache] $CacheName is complete; skipping validation and training."
+    exit 0
+}
 
 $seedArgs = $Seeds | ForEach-Object { "$_" }
-$CacheName = if ($HardConfSwitch) { "final_devign_l3_hardswitch_cache" } else { "final_devign_l3_cache" }
 $gateFlag = @(); if (-not $HardConfSwitch) { $gateFlag = @("--qual-gate") }
 # --fields $Cols: the clean Qwen-only channel (same as final_devign_l2.ps1).
 # --cache-name: keep the hard-switch arm separate so resumable runs never mix

@@ -13,6 +13,7 @@
 param(
     [int]$Batch512 = 2,
     [switch]$EvidenceWindow,
+    [switch]$CleanQwen,
     # Hard confidence switch (alternative to gate): per-sample if/else on
     # confidence field. Confidence >= threshold -> code ALONE; below ->
     # explanation ALONE. Validated direction: HIGH conf -> code.
@@ -21,9 +22,16 @@ param(
 )  # 2 fits 8GB at 512-tok code
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
+. (Join-Path $PSScriptRoot "scripts\cache_complete.ps1")
 $py = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 # Seeds HARDCODED (final_reveal: 5 seeds, matching final_reveal_l1/l2).
 $Seeds = @(1, 2, 3, 4, 5)
+$CacheName = if ($HardConfSwitch) { "final_reveal_l3_hardswitch_cache" }
+             else { "final_reveal_l3_cache" }
+if (Test-CacheComplete -Dataset reveal -Rung L3 -CacheName $CacheName -Seeds $Seeds) {
+    Write-Host "[cache] $CacheName is complete; skipping validation and training."
+    exit 0
+}
 # The clean Qwen-only explanation channel (no spaces).
 # IDENTICAL to final_reveal_l2.ps1 so L2 vs L3 isolates only the gate.
 $Cols = "confidence,purpose,data_flow,risky_operations,missing_checks,evidence_tokens,safety_indicators,risk_summary"
@@ -48,13 +56,15 @@ if ($HardConfSwitch) {
     Remove-Item Env:SEMVUL_HARD_CONF_THRESH -ErrorAction SilentlyContinue
 }
 
-# Reject missing or legacy enriched ACTIVE inputs before training.
-& $py experiments\explanation\validate_clean.py --dataset reveal
-if ($LASTEXITCODE -ne 0) { throw "ACTIVE/reveal is missing or contains legacy enriched inputs" }
+if ($CleanQwen) {
+    Remove-Item Env:SEMVUL_LEGACY_CACHE -ErrorAction SilentlyContinue
+    & $py experiments\explanation\validate_clean.py --dataset reveal
+    if ($LASTEXITCODE -ne 0) { throw "ACTIVE/reveal is missing or contains legacy enriched inputs" }
+} else {
+    $env:SEMVUL_LEGACY_CACHE = "1"
+}
 
 $seedArgs = $Seeds | ForEach-Object { "$_" }
-$CacheName = if ($HardConfSwitch) { "final_reveal_l3_hardswitch_cache" }
-             else { "final_reveal_l3_cache" }
 $gateFlag = @(); if (-not $HardConfSwitch) { $gateFlag = @("--qual-gate") }
 $ew = @(); if ($EvidenceWindow) { $ew = @("--evidence-window") }
 & $py experiments\expl_enrich\reproduce_real.py --only reveal --rungs L3 `

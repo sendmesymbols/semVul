@@ -15,6 +15,7 @@
 # Resumable: a finished rung JSON is skipped.
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
+. "scripts/cache_complete.sh"
 
 BATCH512=2  # 2 fits 8GB; use 4 on >=16GB
 while [[ $# -gt 0 ]]; do
@@ -23,6 +24,13 @@ while [[ $# -gt 0 ]]; do
         *) echo "Unknown argument: $1 (supported: --batch512 N)" >&2; exit 1 ;;
     esac
 done
+
+# Seeds HARDCODED: 5 seeds (matching final_reveal + final_devign_l2/l3).
+SEEDS=(1 2 3 4 5)
+if cache_complete devign L1 final_devign_l1_cache "${SEEDS[@]}"; then
+    echo "[cache] final_devign_l1_cache is complete; skipping validation and training."
+    exit 0
+fi
 
 # Prefer the already-activated venv; fall back to .venv/ or venv/ in the repo.
 if [[ -n "${VIRTUAL_ENV:-}" && -x "$VIRTUAL_ENV/bin/python" ]]; then
@@ -35,16 +43,13 @@ else
     echo "ERROR: no venv python found -- activate your venv or create one (python3 -m venv .venv)" >&2
     exit 1
 fi
-
-# Seeds HARDCODED: 5 seeds (matching final_reveal + final_devign_l2/l3).
-SEEDS=(1 2 3 4 5)
 # The clean Qwen-only explanation channel (unused by L1, retained for parity).
 # L1 ignores the text channel; kept identical to L2/L3 for a uniform launcher.
 COLS="confidence,purpose,data_flow,risky_operations,missing_checks,evidence_tokens,safety_indicators,risk_summary"
 
-# Reject missing or legacy enriched ACTIVE inputs before training.
-"$PY" experiments/explanation/validate_clean.py --dataset devign \
-    || { echo "ERROR: ACTIVE/devign is missing or contains legacy enriched inputs" >&2; exit 1; }
+# Use the original cache family; the driver skips completed seed results and
+# trains only missing seeds.
+export SEMVUL_LEGACY_CACHE=1
 
 # --code-enc codet5p: CodeT5+ (FuSEVul's encoder). --max-text 512: mirror reveal
 # (both windows 512 for devign). --epochs 12: explicit. Devign balanced -> no focal.

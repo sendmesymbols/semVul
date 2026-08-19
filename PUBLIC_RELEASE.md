@@ -8,7 +8,7 @@ publish the workspace directly. Build an allowlisted artifact with
 
 - `Code`: source code and launchers only. Use this for the smallest public code
   release. Dataset and generated-artifact locations are represented by empty
-  directories with explanatory placeholder files.
+  directories with explanatory README placeholder files.
 - `Reviewer`: the code profile plus the four audited CSV splits, the four
   canonical `ACTIVE` explanation files, the six final L1--L3 result-cache
   families, and generated figures. Use this only if the venue permits those
@@ -35,7 +35,8 @@ research workspace.
   `experiments/explanation/`.
 - `experiments/expl_enrich/reproduce_real.py`.
 - The six final per-rung launchers for PowerShell and Bash, the two explanation
-  launchers, `requirements.txt`, `.gitignore`, and the public README.
+  launchers, matching cache-completion helpers, `requirements.txt`, `.gitignore`,
+  and the public README.
 
 ## Deliberately excluded
 
@@ -62,7 +63,8 @@ the private research archive.
    license for third-party code or data until their upstream terms have been
    checked.
 2. If review is double-blind, keep the builder's anonymous default. It strips
-   the acknowledgments section from the copied README. Pass `-KeepIdentities`
+   the acknowledgments section from the copied README and fails if known
+   identifying names remain in text-like release files. Pass `-KeepIdentities`
    only for a non-anonymous public release. Keep identifying metadata out of
    archive names, commit authors, document properties, and generated files.
 3. Confirm redistribution rights for Devign, ReVeal, generated explanations,

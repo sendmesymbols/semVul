@@ -12,17 +12,26 @@
 #   .\final_devign_l2.ps1 -Batch512 4     # 5 seeds, >=16GB GPU
 #   .\final_devign_l2.ps1 -Seeds 1        # single seed (fast)
 # Resumable: a finished rung JSON is skipped.
-param([int]$Batch512 = 2, [int[]]$Seeds = @(1, 2, 3, 4, 5))  # Batch512: 2 fits 8GB, 4 on >=16GB
+param([int]$Batch512 = 2, [int[]]$Seeds = @(1, 2, 3, 4, 5), [switch]$CleanQwen)  # Batch512: 2 fits 8GB, 4 on >=16GB
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
+. (Join-Path $PSScriptRoot "scripts\cache_complete.ps1")
 $py = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 # Seeds come from the -Seeds param (default 1..5; see header).
+if (Test-CacheComplete -Dataset devign -Rung L2 -CacheName final_devign_l2_cache -Seeds $Seeds) {
+    Write-Host "[cache] final_devign_l2_cache is complete; skipping validation and training."
+    exit 0
+}
 # The clean Qwen-only explanation channel (no spaces).
 $Cols = "confidence,purpose,data_flow,risky_operations,missing_checks,evidence_tokens,safety_indicators,risk_summary"
 
-# Reject missing or legacy enriched ACTIVE inputs before training.
-& $py experiments\explanation\validate_clean.py --dataset devign
-if ($LASTEXITCODE -ne 0) { throw "ACTIVE/devign is missing or contains legacy enriched inputs" }
+if ($CleanQwen) {
+    Remove-Item Env:SEMVUL_LEGACY_CACHE -ErrorAction SilentlyContinue
+    & $py experiments\explanation\validate_clean.py --dataset devign
+    if ($LASTEXITCODE -ne 0) { throw "ACTIVE/devign is missing or contains legacy enriched inputs" }
+} else {
+    $env:SEMVUL_LEGACY_CACHE = "1"
+}
 
 $seedArgs = $Seeds | ForEach-Object { "$_" }
 # --fields $Cols: the same clean Qwen-only channel used by the Reveal runs.

@@ -9,12 +9,17 @@
 #   .\final_reveal_l2.ps1                 # batch 2 (8GB); 512-token code window
 #   .\final_reveal_l2.ps1 -Batch512 4     # >=16GB GPU
 # Resumable within the clean-Qwen cache family.
-param([int]$Batch512 = 2, [switch]$EvidenceWindow)  # 2 fits 8GB at 512-tok code
+param([int]$Batch512 = 2, [switch]$EvidenceWindow, [switch]$CleanQwen)  # 2 fits 8GB at 512-tok code
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
+. (Join-Path $PSScriptRoot "scripts\cache_complete.ps1")
 $py = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 # Five fixed seeds for a paired ladder comparison.
 $Seeds = @(1, 2, 3, 4, 5)
+if (Test-CacheComplete -Dataset reveal -Rung L2 -CacheName final_reveal_l2_cache -Seeds $Seeds) {
+    Write-Host "[cache] final_reveal_l2_cache is complete; skipping validation and training."
+    exit 0
+}
 # Qwen-only structured text channel. risk_level remains excluded; confidence is
 # retained for the currently reported configuration and must be ablated before
 # attributing gains exclusively to descriptive explanations.
@@ -25,9 +30,13 @@ $FocalAlpha = 0.85
 $FocalGamma = 2.0
 # ---------------------------------------------------------
 
-# Fail closed if ACTIVE is absent or still contains legacy enriched fields.
-& $py experiments\explanation\validate_clean.py --dataset reveal
-if ($LASTEXITCODE -ne 0) { throw "ACTIVE/reveal is missing or contains legacy enriched inputs" }
+if ($CleanQwen) {
+    Remove-Item Env:SEMVUL_LEGACY_CACHE -ErrorAction SilentlyContinue
+    & $py experiments\explanation\validate_clean.py --dataset reveal
+    if ($LASTEXITCODE -ne 0) { throw "ACTIVE/reveal is missing or contains legacy enriched inputs" }
+} else {
+    $env:SEMVUL_LEGACY_CACHE = "1"
+}
 
 $seedArgs = $Seeds | ForEach-Object { "$_" }
 # --fields $Cols: generator-produced structured fields only (see $Cols above).
